@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "daz_python_bridge",
+  "project_id": "11ba6ffc-b63b-42a1-9088-65bf49815626"
+}
