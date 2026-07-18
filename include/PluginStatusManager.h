@@ -16,7 +16,8 @@ struct PluginStatus {
 	QString state;
 	qint64  pid = -1;          // -1 if the plugin has no live worker
 	qint64  memoryBytes = -1;  // -1 if unknown (psutil unavailable, or no live worker)
-	double  lastUsed = 0;      // monotonic seconds from WorkerManager; 0 if never called
+	double  lastUsed = 0;      // seconds elapsed since last used (server-computed from its own
+	                           // monotonic clock, not a raw timestamp); 0 if never used
 };
 
 // Polls GET http://127.0.0.1:18812/plugins on a QTimer using async

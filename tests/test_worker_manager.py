@@ -177,6 +177,36 @@ def test_manual_restart_after_failure_recovers(tmp_path):
         os.environ.update(env_backup)
 
 
+def test_last_used_is_elapsed_seconds_not_a_raw_timestamp(manager):
+    manager.call("p1", "echo", args=["hi"])
+    last_used = manager.status("p1")["last_used"]
+
+    # A raw time.monotonic() reading would be some large, arbitrary-epoch
+    # number (easily thousands of seconds); elapsed-since-last-use must be
+    # small and non-negative immediately after a call.
+    assert last_used is not None
+    assert 0 <= last_used < 5
+
+
+def test_last_used_persists_after_stop_instead_of_reporting_never(manager):
+    manager.call("p1", "echo", args=["hi"])
+    manager.stop("p1")
+
+    status = manager.status("p1")
+    assert status["state"] == WorkerState.NOT_STARTED.value
+    assert status["pid"] is None
+    assert status["last_used"] is not None
+    assert status["last_used"] >= 0
+
+
+def test_last_used_is_null_for_a_plugin_never_started():
+    mgr = WorkerManager(build_command=_command_for("echo_plugin.py"))
+    try:
+        assert mgr.status("never_started")["last_used"] is None
+    finally:
+        mgr.shutdown()
+
+
 def test_call_to_unknown_function_returns_error_without_crashing(manager):
     with pytest.raises(RuntimeError, match="No exposed function"):
         manager.call("p1", "does_not_exist")

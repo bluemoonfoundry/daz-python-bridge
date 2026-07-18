@@ -74,6 +74,11 @@ class WorkerManager:
         self._structural_lock = threading.RLock()
         self._workers: dict[str, _Worker] = {}
         self._states: dict[str, WorkerState] = {}
+        # Survives stop()/crash/eviction discarding the _Worker object itself,
+        # so status() can keep reporting "last used" accurately after a
+        # plugin is stopped instead of falling back to "never" the moment its
+        # worker goes away.
+        self._last_used: dict[str, float] = {}
 
         self._stop_event = threading.Event()
         self._eviction_thread = threading.Thread(
@@ -127,11 +132,16 @@ class WorkerManager:
 
     def status(self, plugin_id: str) -> dict:
         worker = self._workers.get(plugin_id)
+        last_used = worker.last_used if worker else self._last_used.get(plugin_id)
         return {
             "plugin_id": plugin_id,
             "state": self._states.get(plugin_id, WorkerState.NOT_STARTED).value,
             "pid": worker.process.pid if worker else None,
-            "last_used": worker.last_used if worker else None,
+            # Seconds elapsed since last used, not a raw time.monotonic()
+            # reading -- the latter is only meaningful compared against
+            # another monotonic() call in this same process, which the DSS
+            # client (formatting it as "%1s ago") has no way to do.
+            "last_used": (time.monotonic() - last_used) if last_used is not None else None,
         }
 
     def restart_failed(self, plugin_id: str) -> None:
@@ -178,6 +188,7 @@ class WorkerManager:
                 raise _WorkerCrashError(f"Worker for plugin '{plugin_id}' exited unexpectedly")
 
             worker.last_used = time.monotonic()
+            self._last_used[plugin_id] = worker.last_used
 
         if response.get("ok"):
             return response.get("result")
@@ -201,6 +212,7 @@ class WorkerManager:
             )
             worker = _Worker(process=process)
             self._workers[plugin_id] = worker
+            self._last_used[plugin_id] = worker.last_used
 
         try:
             ready = self._recv(worker.process, self._startup_timeout)

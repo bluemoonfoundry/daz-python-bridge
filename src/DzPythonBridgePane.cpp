@@ -35,15 +35,22 @@ const int kColPid = 2;
 const int kColMemory = 3;
 const int kColLastUsed = 4;
 
+// QChar(0x2014), not the raw "—" literal via QString::fromLatin1(): that
+// literal is a 3-byte UTF-8 sequence in this (UTF-8) source file, and
+// fromLatin1() decodes each byte as its own Latin-1 character instead of one
+// em dash -- mojibake. QChar sidesteps source-encoding-vs-decoder mismatches
+// like that entirely.
+const QChar kEmDash(0x2014);
+
 QString formatMemory(qint64 bytes) {
 	if (bytes < 0) {
-		return QString::fromLatin1("—");
+		return QString(kEmDash);
 	}
 	return QString("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 1);
 }
 
 QString formatPid(qint64 pid) {
-	return pid < 0 ? QString::fromLatin1("—") : QString::number(pid);
+	return pid < 0 ? QString(kEmDash) : QString::number(pid);
 }
 
 QString formatLastUsed(double lastUsed) {
