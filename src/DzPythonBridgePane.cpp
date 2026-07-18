@@ -86,6 +86,18 @@ DzPythonBridgePane::DzPythonBridgePane()
 	QVBoxLayout* contentLayout = new QVBoxLayout(m_pContentContainer);
 	contentLayout->setContentsMargins(0, 0, 0, 0);
 
+	// ─── Installed plugins section ──────────────────────────────────────────
+	// Explicit header so the Start/Stop/Restart/Enable/Disable row below is
+	// unambiguously about the selected row in this table -- the daemon
+	// itself (bootstrap/launch/health) is the status section above, which has
+	// no buttons of its own at all.
+	QFrame* pluginsSep = new QFrame(this);
+	pluginsSep->setFrameShape(QFrame::HLine);
+	pluginsSep->setFrameShadow(QFrame::Sunken);
+	QLabel* pluginsLabel = new QLabel("Installed Plugins", m_pContentContainer);
+	contentLayout->addWidget(pluginsSep);
+	contentLayout->addWidget(pluginsLabel);
+
 	m_pTable = new QTableWidget(0, 5, m_pContentContainer);
 	m_pTable->setHorizontalHeaderLabels(
 		QStringList() << "Plugin" << "State" << "PID" << "Memory" << "Last Used");
@@ -101,12 +113,24 @@ DzPythonBridgePane::DzPythonBridgePane()
 	m_pRestartButton = new QPushButton("Restart", m_pContentContainer);
 	m_pEnableButton = new QPushButton("Enable", m_pContentContainer);
 	m_pDisableButton = new QPushButton("Disable", m_pContentContainer);
+	// These act on the plugin selected in the table above, not the daemon
+	// itself (which has no manual start/stop controls -- it's launched
+	// automatically and its status is shown above instead).
+	m_pStartButton->setToolTip("Start the selected plugin's worker process");
+	m_pStopButton->setToolTip("Stop the selected plugin's worker process");
+	m_pRestartButton->setToolTip("Restart the selected plugin's worker process");
+	m_pEnableButton->setToolTip("Enable the selected plugin");
+	m_pDisableButton->setToolTip("Disable the selected plugin (also stops its worker)");
 	buttonLayout->addWidget(m_pStartButton);
 	buttonLayout->addWidget(m_pStopButton);
 	buttonLayout->addWidget(m_pRestartButton);
 	buttonLayout->addWidget(m_pEnableButton);
 	buttonLayout->addWidget(m_pDisableButton);
 	contentLayout->addLayout(buttonLayout);
+
+	// Disabled until a row is actually selected -- with no plugins installed
+	// (or none selected), there's nothing for these to act on.
+	updateActionButtonsEnabled();
 
 	// Old-style SIGNAL()/SLOT() connect throughout this constructor, not the
 	// PMF-based connect() syntax: this pane is compiled against Qt 4.8 for
@@ -117,6 +141,7 @@ DzPythonBridgePane::DzPythonBridgePane()
 	connect(m_pRestartButton, SIGNAL(clicked()), this, SLOT(onRestartClicked()));
 	connect(m_pEnableButton, SIGNAL(clicked()), this, SLOT(onEnableClicked()));
 	connect(m_pDisableButton, SIGNAL(clicked()), this, SLOT(onDisableClicked()));
+	connect(m_pTable, SIGNAL(itemSelectionChanged()), this, SLOT(onTableSelectionChanged()));
 
 	// ─── Script-IDE-style inline execution section (daz-python-bridge-sop.2) ───
 	QFrame* runSep = new QFrame(this);
@@ -297,6 +322,7 @@ void DzPythonBridgePane::onPluginsUpdated(const QVector<PluginStatus> &plugins) 
 	if (restoredRow >= 0) {
 		m_pTable->selectRow(restoredRow);
 	}
+	updateActionButtonsEnabled();
 }
 
 void DzPythonBridgePane::onActionFinished(const QString &pluginId, PluginStatusManager::Action action,
@@ -324,6 +350,19 @@ void DzPythonBridgePane::performActionOnSelection(PluginStatusManager::Action ac
 		return;
 	}
 	m_pStatusManager->performAction(pluginId, action);
+}
+
+void DzPythonBridgePane::updateActionButtonsEnabled() {
+	const bool hasSelection = !selectedPluginId().isEmpty();
+	m_pStartButton->setEnabled(hasSelection);
+	m_pStopButton->setEnabled(hasSelection);
+	m_pRestartButton->setEnabled(hasSelection);
+	m_pEnableButton->setEnabled(hasSelection);
+	m_pDisableButton->setEnabled(hasSelection);
+}
+
+void DzPythonBridgePane::onTableSelectionChanged() {
+	updateActionButtonsEnabled();
 }
 
 void DzPythonBridgePane::onStartClicked() { performActionOnSelection(PluginStatusManager::Action::Start); }

@@ -45,6 +45,7 @@ private slots:
 	void onRestartClicked();
 	void onEnableClicked();
 	void onDisableClicked();
+	void onTableSelectionChanged();
 	void onExecuteClicked();
 	void onRunFinished(bool success, const QString &resultJson, const QStringList &output, const QString &error);
 
@@ -63,6 +64,7 @@ private slots:
 private:
 	QString selectedPluginId() const;
 	void performActionOnSelection(PluginStatusManager::Action action);
+	void updateActionButtonsEnabled();
 	void setDaemonStatus(const QString &text, const QString &color);
 	void appendLog(const QString &source, const QString &message);
 
