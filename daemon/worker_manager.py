@@ -90,6 +90,16 @@ class WorkerManager:
         kwargs: Optional[dict] = None,
         timeout: float = DEFAULT_CALL_TIMEOUT_SECONDS,
     ):
+        return self._with_crash_retry(
+            plugin_id, lambda: self._call_once(plugin_id, function, args, kwargs, timeout)
+        )
+
+    def start(self, plugin_id: str) -> None:
+        """Explicitly spawn (or confirm) plugin_id's worker, for the status UI's
+        manual start control -- unlike call(), this makes no plugin function call."""
+        self._with_crash_retry(plugin_id, lambda: self._ensure_worker(plugin_id))
+
+    def _with_crash_retry(self, plugin_id: str, action: Callable):
         if self._states.get(plugin_id) == WorkerState.FAILED:
             raise WorkerFailedError(
                 f"Plugin '{plugin_id}' worker is in failed state; manual restart required."
@@ -98,7 +108,7 @@ class WorkerManager:
         last_exc: Optional[Exception] = None
         for attempt in range(2):  # spawn/current + one automatic restart
             try:
-                return self._call_once(plugin_id, function, args, kwargs, timeout)
+                return action()
             except _WorkerCrashError as exc:
                 last_exc = exc
                 with self._structural_lock:

@@ -13,6 +13,7 @@ add_library(DazPythonBridgeCore STATIC
 	ZipInstaller.cpp
 	PluginDependencyInstaller.cpp
 	PluginInstaller.cpp
+	PluginStatusManager.cpp
 	miniz.c
 	../include/DaemonPaths.h
 	../include/UvBootstrapper.h
@@ -21,6 +22,7 @@ add_library(DazPythonBridgeCore STATIC
 	../include/ZipInstaller.h
 	../include/PluginDependencyInstaller.h
 	../include/PluginInstaller.h
+	../include/PluginStatusManager.h
 	../include/common_version.h
 	miniz.h
 )

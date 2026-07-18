@@ -5,16 +5,83 @@ Launched by DaemonProcess (src/DaemonProcess.cpp) as:
     <run_venv>/bin/python -m uvicorn daemon.app:app --host 127.0.0.1 --port 18812
 
 Always bound to loopback by the launcher — this app does not decide its own
-bind address. Endpoints beyond /health (token auth, /run, /plugins/*) are
-added by the other DPB child issues; this is deliberately just the bootstrap
-skeleton so DaemonHealthMonitor has something to poll against.
+bind address. Token auth and the /run inline-scripting endpoint are added by
+other DPB child issues (daz-python-bridge-sop.7/.2); this app currently
+covers /health (bootstrap) and /plugins/* (daz-python-bridge-sop.6), which
+DSS's plugin status pane polls via QNetworkAccessManager.
 """
 
-from fastapi import FastAPI
+import os
+
+from fastapi import FastAPI, HTTPException
+
+from . import paths
+from .plugin_registry import DazPluginNotReadyError, PluginNotFoundError, PluginRegistry
+from .worker_manager import WorkerFailedError, WorkerManager
 
 app = FastAPI(title="Daz Python Bridge Daemon")
+
+
+def _build_command(plugin_id: str) -> list[str]:
+    plugin_venv = paths.plugins_dir() / plugin_id / "venv"
+    python = plugin_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    entry = paths.plugins_dir() / plugin_id / "main.py"
+    return [str(python), "-m", "daemon.worker_runtime", "--entry", str(entry)]
+
+
+worker_manager = WorkerManager(build_command=_build_command)
+plugin_registry = PluginRegistry(plugins_dir=paths.plugins_dir(), worker_manager=worker_manager)
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/plugins")
+def list_plugins() -> dict:
+    return {"plugins": plugin_registry.list_plugins()}
+
+
+@app.get("/plugins/{plugin_id}")
+def get_plugin(plugin_id: str) -> dict:
+    try:
+        return plugin_registry.status(plugin_id)
+    except PluginNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Unknown plugin '{plugin_id}'")
+
+
+def _do_action(plugin_id: str, action) -> dict:
+    try:
+        return action(plugin_id)
+    except PluginNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Unknown plugin '{plugin_id}'")
+    except DazPluginNotReadyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except WorkerFailedError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/plugins/{plugin_id}/start")
+def start_plugin(plugin_id: str) -> dict:
+    return _do_action(plugin_id, plugin_registry.start)
+
+
+@app.post("/plugins/{plugin_id}/stop")
+def stop_plugin(plugin_id: str) -> dict:
+    return _do_action(plugin_id, plugin_registry.stop)
+
+
+@app.post("/plugins/{plugin_id}/restart")
+def restart_plugin(plugin_id: str) -> dict:
+    return _do_action(plugin_id, plugin_registry.restart)
+
+
+@app.post("/plugins/{plugin_id}/enable")
+def enable_plugin(plugin_id: str) -> dict:
+    return _do_action(plugin_id, plugin_registry.enable)
+
+
+@app.post("/plugins/{plugin_id}/disable")
+def disable_plugin(plugin_id: str) -> dict:
+    return _do_action(plugin_id, plugin_registry.disable)
