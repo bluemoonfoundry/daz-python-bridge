@@ -62,6 +62,27 @@ def _make_plugin_dir(plugins_dir: Path, plugin_id: str, install_state: str = "ok
     return plugin_dir
 
 
+def test_build_command_invokes_worker_runtime_by_direct_path(client):
+    # Regression test: the real _build_command used to spawn
+    # `<plugin_venv_python> -m daemon.worker_runtime`, which only works if the
+    # daemon package is importable from the plugin's own venv -- but
+    # PluginDependencyInstaller (C++, sop.4) never installs it there, only
+    # requirements.txt. worker_runtime.py has zero third-party dependencies,
+    # so invoking it by direct file path needs nothing installed at all. The
+    # `client` fixture above overrides worker_manager._build_command for its
+    # own HTTP tests, but the original module-level function is untouched.
+    _, plugins_dir = client
+    import daemon.app as app_module
+
+    command = app_module._build_command("some_plugin")
+
+    assert "-m" not in command
+    assert "daemon.worker_runtime" not in command
+    assert Path(command[1]) == app_module._WORKER_RUNTIME_PATH
+    assert app_module._WORKER_RUNTIME_PATH.is_file()
+    assert app_module._WORKER_RUNTIME_PATH.name == "worker_runtime.py"
+
+
 def test_list_plugins_empty(client):
     c, _ = client
     resp = c.get("/plugins")

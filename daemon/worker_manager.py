@@ -6,10 +6,13 @@ newline-delimited JSON protocol implemented by worker_runtime.py over stdin/stdo
 
 This module has no opinion on venv layout, zip installs, or plugin discovery
 (daz-python-bridge-sop.3/.4/.6) -- callers supply a build_command(plugin_id)
-callback that returns the argv to spawn, e.g.:
+callback that returns the argv to spawn, e.g. (see app.py's real
+_build_command: worker_runtime.py is invoked by direct file path, not as
+`-m daemon.worker_runtime` -- a per-plugin venv never has the daemon package
+itself installed into it, only requirements.txt):
 
     [str(DaemonPaths.pluginVenvDir(plugin_id) / "Scripts" / "python.exe"),
-     "-m", "daemon.worker_runtime", "--entry", str(plugin_dir / "main.py")]
+     str(worker_runtime_path), "--entry", str(plugin_dir / "main.py")]
 
 Crash policy: one automatic restart on worker crash; if the immediate retry also
 crashes, the plugin flips to FAILED and further calls are rejected until

@@ -13,6 +13,7 @@ scripting endpoint behind DSS's Script-IDE-style pane, see inline_runner.py.
 """
 
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
@@ -27,12 +28,21 @@ app = FastAPI(title="Daz Python Bridge Daemon")
 plugins_router = APIRouter(dependencies=[Depends(require_token)])
 run_router = APIRouter(dependencies=[Depends(require_token)])
 
+# worker_runtime.py's own file path, resolved relative to this installed
+# package rather than run as `-m daemon.worker_runtime`: a per-plugin venv
+# only ever gets requirements.txt installed into it (PluginDependencyInstaller,
+# daz-python-bridge-sop.4), never the daemon package itself, so `-m
+# daemon.worker_runtime` would fail there with ModuleNotFoundError. Invoking
+# by direct path works because worker_runtime.py has zero third-party
+# dependencies -- only stdlib -- so it needs nothing installed to run.
+_WORKER_RUNTIME_PATH = Path(__file__).resolve().parent / "worker_runtime.py"
+
 
 def _build_command(plugin_id: str) -> list[str]:
     plugin_venv = paths.plugins_dir() / plugin_id / "venv"
     python = plugin_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     entry = paths.plugins_dir() / plugin_id / "main.py"
-    return [str(python), "-m", "daemon.worker_runtime", "--entry", str(entry)]
+    return [str(python), str(_WORKER_RUNTIME_PATH), "--entry", str(entry)]
 
 
 worker_manager = WorkerManager(build_command=_build_command)
