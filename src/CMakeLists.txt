@@ -10,11 +10,15 @@ add_library(DazPythonBridgeCore STATIC
 	UvBootstrapper.cpp
 	DaemonProcess.cpp
 	DaemonHealthMonitor.cpp
+	ZipInstaller.cpp
+	miniz.c
 	../include/DaemonPaths.h
 	../include/UvBootstrapper.h
 	../include/DaemonProcess.h
 	../include/DaemonHealthMonitor.h
+	../include/ZipInstaller.h
 	../include/common_version.h
+	miniz.h
 )
 
 target_include_directories(DazPythonBridgeCore
@@ -28,6 +32,11 @@ target_link_libraries(DazPythonBridgeCore
 	Qt6::Core
 	Qt6::Network
 )
+
+# Manual/CI test harness for ZipInstaller — see tests/cpp/test_zip_installer.cpp.
+# Builds standalone (no DAZ SDK) alongside DazPythonBridgeCore.
+add_executable(test_zip_installer ../tests/cpp/test_zip_installer.cpp)
+target_link_libraries(test_zip_installer PRIVATE DazPythonBridgeCore)
 
 # ─── DzPythonBridge: DSS plugin (pane) ────────────────────────────────────────
 #
