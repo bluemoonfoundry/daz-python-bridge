@@ -7,13 +7,18 @@
 // Per-plugin venv creation and eager dependency resolution
 // (daz-python-bridge-sop.4).
 //
-// Run once, right after ZipInstaller lands a plugin directory: creates an
-// isolated venv at DaemonPaths::pluginVenvDir(pluginId), bound to the same
-// Python 3.11 build UvBootstrapper already downloaded (so creation is
-// sub-second), then -- if the plugin ships a requirements.txt -- installs it
-// into that venv via `uv pip install -r`. Two plugins pinning conflicting
-// dependency versions cannot clobber each other because each gets its own
-// venv rather than a shared site-packages.
+// Run right after ZipInstaller lands a plugin directory -- either a fresh
+// install, or PluginInstaller re-running this after a reinstall over an
+// existing plugin id (daz-python-bridge-sop.8): creates an isolated venv at
+// DaemonPaths::pluginVenvDir(pluginId), bound to the same Python 3.11 build
+// UvBootstrapper already downloaded (so creation is sub-second), then -- if
+// the plugin ships a requirements.txt -- installs it into that venv via
+// `uv pip install -r`. Two plugins pinning conflicting dependency versions
+// cannot clobber each other because each gets its own venv rather than a
+// shared site-packages. venv creation always passes --clear so a reinstall's
+// fresh resolution isn't left holding stale packages from the previous one
+// (the venv directory lives outside the plugin's zip-extracted tree, so a
+// reinstall's file swap never touches it on its own).
 //
 // Resolution is eager, not lazy: run() is meant to be called immediately
 // after extraction, so a broken requirements.txt is caught and recorded as a

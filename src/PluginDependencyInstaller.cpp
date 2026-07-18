@@ -66,7 +66,13 @@ void PluginDependencyInstaller::createVenv() {
 
 	m_process = new QProcess(this);
 	m_process->setProgram(DaemonPaths::uvBinaryPath());
-	m_process->setArguments({"venv", DaemonPaths::pluginVenvDir(m_pluginId), "--python", "3.11"});
+	// --clear: a reinstall over an existing plugin id (daz-python-bridge-sop.8)
+	// re-runs dependency resolution against the *new* requirements.txt, but
+	// the venv directory itself lives outside the plugin's zip-extracted
+	// tree (under DaemonPaths::pluginVenvDir), so ZipInstaller's file swap
+	// never touches it -- without --clear, `uv venv` refuses to recreate an
+	// already-existing venv. Harmless no-op for a first install.
+	m_process->setArguments({"venv", DaemonPaths::pluginVenvDir(m_pluginId), "--python", "3.11", "--clear"});
 
 	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
 	        this, &PluginDependencyInstaller::onCreateVenvFinished);

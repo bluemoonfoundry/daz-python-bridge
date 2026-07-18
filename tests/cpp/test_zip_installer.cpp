@@ -17,6 +17,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 
@@ -123,7 +124,8 @@ int main(int argc, char *argv[])
 			"rejected lying-header archive did not land in the final plugins dir");
 	}
 
-	// ─── Reinstall over an existing plugin id is refused (sop.8's job, not ours) ──
+	// ─── Reinstall over an existing plugin id via install() is refused ─────
+	// (PluginInstaller's job to actually reinstall, daz-python-bridge-sop.8) ─
 	{
 		QTemporaryDir pluginsDir;
 		ZipInstaller installer(pluginsDir.path());
@@ -131,7 +133,49 @@ int main(int argc, char *argv[])
 		expectTrue(first.success, "first install of valid_plugin succeeds");
 
 		const ZipInstaller::Result second = installer.install(QDir(fixtures).filePath("valid_plugin.zip"));
-		expectTrue(!second.success, "reinstalling the same plugin id is refused, not silently overwritten");
+		expectTrue(!second.success, "reinstalling the same plugin id via install() is refused, not silently overwritten");
+	}
+
+	// ─── extractToStaging()/commit() let a caller overwrite-by-id (sop.8) ──
+	{
+		QTemporaryDir pluginsDir;
+		ZipInstaller installer(pluginsDir.path());
+
+		const ZipInstaller::StageResult firstStage = installer.extractToStaging(QDir(fixtures).filePath("valid_plugin.zip"));
+		expectTrue(firstStage.success, "extractToStaging succeeds for a fresh id");
+		const ZipInstaller::CommitResult firstCommit = installer.commit(firstStage.pluginId, firstStage.stagingDir);
+		expectTrue(firstCommit.success, "commit lands a fresh install");
+
+		// Simulate the plugin having been in use: a marker file inside it that
+		// must NOT survive the overwrite, proving a real replace happened
+		// rather than a no-op or a merge.
+		QFile marker(QDir(firstCommit.finalPluginDir).filePath("stale_marker.txt"));
+		expectTrue(marker.open(QIODevice::WriteOnly), "marker file for the pre-overwrite install opens");
+		marker.write("old version's file");
+		marker.close();
+
+		const ZipInstaller::StageResult secondStage = installer.extractToStaging(QDir(fixtures).filePath("valid_plugin.zip"));
+		expectTrue(secondStage.success, "extractToStaging succeeds again for the same id");
+		expectTrue(QFileInfo::exists(QDir(pluginsDir.path()).filePath("valid_plugin/stale_marker.txt")),
+			"existing install is untouched while the new archive is only staged");
+
+		const ZipInstaller::CommitResult secondCommit = installer.commit(secondStage.pluginId, secondStage.stagingDir);
+		expectTrue(secondCommit.success, "commit overwrites the existing plugin id");
+		expectTrue(QFileInfo::exists(QDir(pluginsDir.path()).filePath("valid_plugin/manifest.json")),
+			"reinstalled plugin's files are present");
+		expectTrue(!QFileInfo::exists(QDir(pluginsDir.path()).filePath("valid_plugin/stale_marker.txt")),
+			"old install's file did not survive the overwrite");
+
+		const QStringList topLevelEntries = QDir(pluginsDir.path())
+			.entryList(QDir::AllDirs | QDir::NoDotAndDotDot);
+		bool hasDisplacedDir = false;
+		for (const QString &entry : topLevelEntries) {
+			if (entry.startsWith(QStringLiteral("valid_plugin.old-"))) {
+				hasDisplacedDir = true;
+			}
+		}
+		expectTrue(!hasDisplacedDir,
+			"no displaced valid_plugin.old-<uuid> directory is left behind after a successful overwrite");
 	}
 
 	std::printf("\n%s\n", g_failures == 0 ? "ALL TESTS PASSED" : "TESTS FAILED");

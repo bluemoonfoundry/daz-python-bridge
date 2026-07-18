@@ -99,6 +99,36 @@ ZipInstaller::Result ZipInstaller::install(const QString &zipPath) const
 {
 	Result result;
 
+	const StageResult staged = extractToStaging(zipPath);
+	if (!staged.success) {
+		result.errorMessage = staged.errorMessage;
+		return result;
+	}
+
+	const QString finalDir = QDir(m_pluginsDir).filePath(staged.pluginId);
+	if (QFileInfo::exists(finalDir)) {
+		QDir(staged.stagingDir).removeRecursively();
+		result.errorMessage = QStringLiteral(
+			"Plugin '%1' is already installed; reinstall is not handled by this installer").arg(staged.pluginId);
+		return result;
+	}
+
+	const CommitResult committed = commit(staged.pluginId, staged.stagingDir);
+	if (!committed.success) {
+		result.errorMessage = committed.errorMessage;
+		return result;
+	}
+
+	result.success = true;
+	result.pluginId = staged.pluginId;
+	result.finalPluginDir = committed.finalPluginDir;
+	return result;
+}
+
+ZipInstaller::StageResult ZipInstaller::extractToStaging(const QString &zipPath) const
+{
+	StageResult result;
+
 	if (!QFileInfo::exists(zipPath)) {
 		result.errorMessage = QStringLiteral("Archive not found: %1").arg(zipPath);
 		return result;
@@ -117,7 +147,7 @@ ZipInstaller::Result ZipInstaller::install(const QString &zipPath) const
 		return result;
 	}
 
-	auto failAndCleanStaging = [&](const QString &message) -> Result {
+	auto failAndCleanStaging = [&](const QString &message) -> StageResult {
 		QDir(stagingRoot).removeRecursively();
 		result.success = false;
 		result.errorMessage = message;
@@ -234,18 +264,43 @@ ZipInstaller::Result ZipInstaller::install(const QString &zipPath) const
 		return failAndCleanStaging(QStringLiteral("manifest.json 'id' field must be a non-empty string matching [A-Za-z0-9_-]+"));
 	}
 
-	const QString finalDir = pluginsDir.filePath(pluginId);
-	if (QFileInfo::exists(finalDir)) {
-		return failAndCleanStaging(QStringLiteral(
-			"Plugin '%1' is already installed; reinstall is not handled by this installer").arg(pluginId));
-	}
+	result.success = true;
+	result.pluginId = pluginId;
+	result.version = manifestDoc.object().value(QStringLiteral("version")).toString();
+	result.stagingDir = stagingRoot;
+	return result;
+}
 
-	if (!QDir().rename(stagingRoot, finalDir)) {
-		return failAndCleanStaging(QStringLiteral("Could not move staged plugin into place: %1").arg(finalDir));
+ZipInstaller::CommitResult ZipInstaller::commit(const QString &pluginId, const QString &stagingDir) const
+{
+	CommitResult result;
+	QDir pluginsDir(m_pluginsDir);
+	const QString finalDir = pluginsDir.filePath(pluginId);
+
+	if (QFileInfo::exists(finalDir)) {
+		// Overwrite-by-id: move the existing install aside, swap the staged
+		// one into place, then discard the displaced one -- so a rename
+		// failure on either leg leaves a recognizable `.old-<uuid>` directory
+		// behind rather than a half-replaced or lost plugin.
+		const QString displacedDir = pluginsDir.filePath(
+			pluginId + QStringLiteral(".old-") + QUuid::createUuid().toString(QUuid::WithoutBraces));
+		if (!QDir().rename(finalDir, displacedDir)) {
+			result.errorMessage = QStringLiteral(
+				"Could not move aside the existing plugin to replace it (a running worker may still hold a file lock): %1").arg(finalDir);
+			return result;
+		}
+		if (!QDir().rename(stagingDir, finalDir)) {
+			QDir().rename(displacedDir, finalDir);  // best-effort restore of the previous install
+			result.errorMessage = QStringLiteral("Could not move staged plugin into place: %1").arg(finalDir);
+			return result;
+		}
+		QDir(displacedDir).removeRecursively();
+	} else if (!QDir().rename(stagingDir, finalDir)) {
+		result.errorMessage = QStringLiteral("Could not move staged plugin into place: %1").arg(finalDir);
+		return result;
 	}
 
 	result.success = true;
-	result.pluginId = pluginId;
 	result.finalPluginDir = finalDir;
 	return result;
 }

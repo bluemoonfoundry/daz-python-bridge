@@ -56,6 +56,12 @@ target_link_libraries(test_zip_installer PRIVATE DazPythonBridgeCore)
 add_executable(test_plugin_dependency_installer ../tests/cpp/test_plugin_dependency_installer.cpp)
 target_link_libraries(test_plugin_dependency_installer PRIVATE DazPythonBridgeCore)
 
+# Manual/CI test harness for PluginInstaller's reinstall-over-an-existing-id
+# flow — see tests/cpp/test_plugin_installer.cpp. Same uv/network requirement
+# as test_plugin_dependency_installer above.
+add_executable(test_plugin_installer ../tests/cpp/test_plugin_installer.cpp)
+target_link_libraries(test_plugin_installer PRIVATE DazPythonBridgeCore)
+
 # ─── DzPythonBridge: DSS plugin (pane) ────────────────────────────────────────
 #
 # Only built when BUILD_DSS_PLUGIN is ON (see top-level CMakeLists.txt), which
