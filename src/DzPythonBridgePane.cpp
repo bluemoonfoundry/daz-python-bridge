@@ -15,6 +15,8 @@
 #include <QtGui/qpushbutton.h>
 #endif
 
+#include <QDateTime>
+
 namespace {
 
 const int kPollIntervalMs = 2000;
@@ -53,6 +55,23 @@ DzPythonBridgePane::DzPythonBridgePane()
 	QFrame* titleSep = new QFrame(this);
 	titleSep->setFrameShape(QFrame::HLine);
 	titleSep->setFrameShadow(QFrame::Sunken);
+
+	// ─── Daemon status/log section ──────────────────────────────────────────
+	// Always visible at the top of the pane: a one-line color-coded status
+	// (bootstrapping/starting/running/unreachable/failed) plus a running log
+	// combining bootstrap steps, daemon process lifecycle events, the daemon
+	// subprocess's own stdout/stderr, and health poll transitions. Without
+	// this there was no visible indication the daemon even exists -- nothing
+	// previously triggered UvBootstrapper/DaemonProcess at all.
+	m_pDaemonStatusLabel = new QLabel("Daemon: initializing...", this);
+	m_pDaemonStatusLabel->setStyleSheet("QLabel { font-weight: bold; padding: 2px 0px; }");
+
+	m_pLogView = new QPlainTextEdit(this);
+	m_pLogView->setReadOnly(true);
+	m_pLogView->setMaximumHeight(120);
+#if DAZ_SDK_MAJOR_VERSION >= 6
+	m_pLogView->setPlaceholderText("Daemon log output appears here.");
+#endif
 
 	m_pContentContainer = new QWidget(this);
 	QVBoxLayout* contentLayout = new QVBoxLayout(m_pContentContainer);
@@ -130,6 +149,33 @@ DzPythonBridgePane::DzPythonBridgePane()
 	QStringList authMessages;
 	m_authService.loadOrGenerateToken(authMessages);
 
+	// ─── Daemon lifecycle: bootstrap -> launch -> health polling ───────────
+	m_pBootstrapper = new UvBootstrapper(this);
+	connect(m_pBootstrapper, SIGNAL(stepStarted(QString)), this, SLOT(onBootstrapStepStarted(QString)));
+	connect(m_pBootstrapper, SIGNAL(stepSucceeded(QString)), this, SLOT(onBootstrapStepSucceeded(QString)));
+	connect(m_pBootstrapper, SIGNAL(stepFailed(QString, QString)), this, SLOT(onBootstrapStepFailed(QString, QString)));
+	connect(m_pBootstrapper, SIGNAL(ready()), this, SLOT(onBootstrapReady()));
+
+	m_pDaemonProcess = new DaemonProcess(this);
+	connect(m_pDaemonProcess, SIGNAL(started()), this, SLOT(onDaemonStarted()));
+	connect(m_pDaemonProcess, SIGNAL(crashed(int, QProcess::ExitStatus)),
+	        this, SLOT(onDaemonCrashed(int, QProcess::ExitStatus)));
+	connect(m_pDaemonProcess, SIGNAL(logLine(QString)), this, SLOT(onDaemonLogLine(QString)));
+
+	// Deliberately independent of bootstrap/launch state -- this is the
+	// authoritative "is the daemon actually answering requests" signal (see
+	// DaemonHealthMonitor's own header comment), so it starts polling
+	// immediately rather than waiting on our own launch attempt succeeding.
+	m_pHealthMonitor = new DaemonHealthMonitor(this);
+	m_pHealthMonitor->setAuthToken(m_authService.getToken());
+	connect(m_pHealthMonitor, SIGNAL(healthUp()), this, SLOT(onHealthUp()));
+	connect(m_pHealthMonitor, SIGNAL(healthDown()), this, SLOT(onHealthDown()));
+	m_pHealthMonitor->start(kPollIntervalMs);
+
+	setDaemonStatus("bootstrapping...", "#b8860b");
+	appendLog("PANE", "Starting daemon bootstrap");
+	m_pBootstrapper->ensureReady();
+
 	m_pStatusManager = new PluginStatusManager(this);
 	m_pStatusManager->setAuthToken(m_authService.getToken());
 	connect(m_pStatusManager, SIGNAL(pluginsUpdated(QVector<PluginStatus>)),
@@ -152,8 +198,66 @@ DzPythonBridgePane::DzPythonBridgePane()
 	mainLayout->setContentsMargins(4, 4, 4, 4);
 	mainLayout->addWidget(titleLabel);
 	mainLayout->addWidget(titleSep);
+	mainLayout->addWidget(m_pDaemonStatusLabel);
+	mainLayout->addWidget(m_pLogView);
 	mainLayout->addWidget(m_pContentContainer);
 	setLayout(mainLayout);
+}
+
+void DzPythonBridgePane::setDaemonStatus(const QString &text, const QString &color) {
+	m_pDaemonStatusLabel->setText(QString("Daemon: %1").arg(text));
+	m_pDaemonStatusLabel->setStyleSheet(
+		QString("QLabel { font-weight: bold; padding: 2px 0px; color: %1; }").arg(color));
+}
+
+void DzPythonBridgePane::appendLog(const QString &source, const QString &message) {
+	const QString timestamp = QDateTime::currentDateTime().toString("HH:mm:ss");
+	m_pLogView->appendPlainText(QString("[%1] [%2] %3").arg(timestamp, source, message));
+}
+
+void DzPythonBridgePane::onBootstrapStepStarted(const QString &step) {
+	setDaemonStatus(QString("bootstrapping (%1)...").arg(step), "#b8860b");
+	appendLog("BOOTSTRAP", QString("%1: started").arg(step));
+}
+
+void DzPythonBridgePane::onBootstrapStepSucceeded(const QString &step) {
+	appendLog("BOOTSTRAP", QString("%1: ok").arg(step));
+}
+
+void DzPythonBridgePane::onBootstrapStepFailed(const QString &step, const QString &errorMessage) {
+	setDaemonStatus(QString("bootstrap failed (%1)").arg(step), "#c0392b");
+	appendLog("BOOTSTRAP", QString("%1: FAILED -- %2").arg(step, errorMessage));
+}
+
+void DzPythonBridgePane::onBootstrapReady() {
+	appendLog("BOOTSTRAP", "ready -- launching daemon");
+	setDaemonStatus("starting...", "#b8860b");
+	m_pDaemonProcess->start();
+}
+
+void DzPythonBridgePane::onDaemonStarted() {
+	appendLog("DAEMON", QString("process started (pid %1)").arg(m_pDaemonProcess->processId()));
+	setDaemonStatus("starting (waiting for health check)...", "#b8860b");
+}
+
+void DzPythonBridgePane::onDaemonCrashed(int exitCode, QProcess::ExitStatus status) {
+	Q_UNUSED(status);
+	setDaemonStatus(QString("crashed (exit code %1)").arg(exitCode), "#c0392b");
+	appendLog("DAEMON", QString("process exited unexpectedly, code %1").arg(exitCode));
+}
+
+void DzPythonBridgePane::onDaemonLogLine(const QString &line) {
+	appendLog("DAEMON", line);
+}
+
+void DzPythonBridgePane::onHealthUp() {
+	setDaemonStatus("running", "#2e7d32");
+	appendLog("HEALTH", "daemon is up");
+}
+
+void DzPythonBridgePane::onHealthDown() {
+	setDaemonStatus("unreachable", "#c0392b");
+	appendLog("HEALTH", "daemon is not responding");
 }
 
 void DzPythonBridgePane::onPluginsUpdated(const QVector<PluginStatus> &plugins) {

@@ -40,12 +40,17 @@ void DaemonProcess::start() {
 		<< "--port" << QString::number(kPort);
 	m_process->setWorkingDirectory(DaemonPaths::baseDir());
 
+	m_stdoutBuffer.clear();
+	m_stderrBuffer.clear();
+
 	// Old-style SIGNAL()/SLOT() connect (not PMF-based): this class is
 	// compiled against Qt 4.8 for the SDK4 DSS plugin (daz-python-bridge-7wq),
 	// which has no function-pointer connect() overload.
 	connect(m_process, SIGNAL(started()), this, SLOT(onStarted()));
 	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
 	        this, SLOT(onFinished(int, QProcess::ExitStatus)));
+	connect(m_process, SIGNAL(readyReadStandardOutput()), this, SLOT(onReadyReadStandardOutput()));
+	connect(m_process, SIGNAL(readyReadStandardError()), this, SLOT(onReadyReadStandardError()));
 
 	// start(program, arguments) in one call, not setProgram()+setArguments()+
 	// start() -- the latter is Qt5.6+ only; the combined-args overload is the
@@ -101,6 +106,31 @@ void DaemonProcess::onFinished(int exitCode, QProcess::ExitStatus status) {
 	}
 	if (!wasStopRequested) {
 		emit crashed(exitCode, status);
+	}
+}
+
+void DaemonProcess::emitBufferedLines(QByteArray &buffer, const QByteArray &chunk) {
+	buffer += chunk;
+	int newlineIndex;
+	while ((newlineIndex = buffer.indexOf('\n')) != -1) {
+		QByteArray line = buffer.left(newlineIndex);
+		buffer.remove(0, newlineIndex + 1);
+		if (line.endsWith('\r')) {
+			line.chop(1);
+		}
+		emit logLine(QString::fromUtf8(line));
+	}
+}
+
+void DaemonProcess::onReadyReadStandardOutput() {
+	if (m_process) {
+		emitBufferedLines(m_stdoutBuffer, m_process->readAllStandardOutput());
+	}
+}
+
+void DaemonProcess::onReadyReadStandardError() {
+	if (m_process) {
+		emitBufferedLines(m_stderrBuffer, m_process->readAllStandardError());
 	}
 }
 

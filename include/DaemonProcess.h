@@ -31,11 +31,24 @@ signals:
 	// stop() does not emit this.
 	void crashed(int exitCode, QProcess::ExitStatus status);
 
+	// One emission per line of the daemon subprocess's own stdout/stderr
+	// (uvicorn's startup banner, request logs, any print() output), so a
+	// caller (the status pane) can show what the daemon is actually doing --
+	// there is no other way to see this, since nothing else surfaces the
+	// daemon's own log output.
+	void logLine(const QString &line);
+
 private slots:
 	void onStarted();
 	void onFinished(int exitCode, QProcess::ExitStatus status);
+	void onReadyReadStandardOutput();
+	void onReadyReadStandardError();
 
 private:
+	void emitBufferedLines(QByteArray &buffer, const QByteArray &chunk);
+
 	QProcess *m_process = nullptr;
 	bool m_stopRequested = false;
+	QByteArray m_stdoutBuffer;
+	QByteArray m_stderrBuffer;
 };

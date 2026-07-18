@@ -3,8 +3,11 @@
 #include <dzpane.h>
 
 #include "AuthenticationService.h"
+#include "DaemonHealthMonitor.h"
+#include "DaemonProcess.h"
 #include "InlineRunner.h"
 #include "PluginStatusManager.h"
+#include "UvBootstrapper.h"
 
 #if DAZ_SDK_MAJOR_VERSION >= 6
 // These widget classes moved from QtGui to QtWidgets in Qt5/6.
@@ -17,6 +20,7 @@
 #include <QtGui/qplaintextedit.h>
 #endif
 
+class QLabel;
 class QPushButton;
 
 // Dockable "Daz Python Bridge" pane shell, registered under Window > Panes by
@@ -44,9 +48,23 @@ private slots:
 	void onExecuteClicked();
 	void onRunFinished(bool success, const QString &resultJson, const QStringList &output, const QString &error);
 
+	// Daemon lifecycle: bootstrap (uv/Python 3.11/run_venv/deps) -> launch ->
+	// health polling. See constructor for the full chain.
+	void onBootstrapStepStarted(const QString &step);
+	void onBootstrapStepSucceeded(const QString &step);
+	void onBootstrapStepFailed(const QString &step, const QString &errorMessage);
+	void onBootstrapReady();
+	void onDaemonStarted();
+	void onDaemonCrashed(int exitCode, QProcess::ExitStatus status);
+	void onDaemonLogLine(const QString &line);
+	void onHealthUp();
+	void onHealthDown();
+
 private:
 	QString selectedPluginId() const;
 	void performActionOnSelection(PluginStatusManager::Action action);
+	void setDaemonStatus(const QString &text, const QString &color);
+	void appendLog(const QString &source, const QString &message);
 
 	QWidget*               m_pContentContainer;
 	QTableWidget*          m_pTable;
@@ -65,4 +83,15 @@ private:
 	QPushButton*            m_pExecuteButton;
 	QPlainTextEdit*         m_pRunOutput;
 	InlineRunner*           m_pInlineRunner;
+
+	// Daemon status/log section (visible at the top of the pane): a
+	// color-coded one-line status label plus a running log combining
+	// bootstrap steps, daemon process lifecycle events, the daemon
+	// subprocess's own stdout/stderr, and health poll transitions -- so it's
+	// obvious from the pane alone whether the daemon is up and, if not, why.
+	QLabel*                 m_pDaemonStatusLabel;
+	QPlainTextEdit*         m_pLogView;
+	UvBootstrapper*         m_pBootstrapper;
+	DaemonProcess*          m_pDaemonProcess;
+	DaemonHealthMonitor*    m_pHealthMonitor;
 };
