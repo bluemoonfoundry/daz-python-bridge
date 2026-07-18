@@ -14,6 +14,7 @@ add_library(DazPythonBridgeCore STATIC
 	PluginDependencyInstaller.cpp
 	PluginInstaller.cpp
 	PluginStatusManager.cpp
+	InlineRunner.cpp
 	SecureRandom.cpp
 	AuthenticationService.cpp
 	miniz.c
@@ -25,6 +26,7 @@ add_library(DazPythonBridgeCore STATIC
 	../include/PluginDependencyInstaller.h
 	../include/PluginInstaller.h
 	../include/PluginStatusManager.h
+	../include/InlineRunner.h
 	../include/SecureRandom.h
 	../include/AuthenticationService.h
 	../include/common_version.h
@@ -83,6 +85,15 @@ target_link_libraries(DzPythonBridge
 	${DZSDK_QT_NETWORK_TARGET}
 	${DZSDK_QT_SCRIPT_TARGET}
 )
+
+if(DAZ_SDK_VERSION STREQUAL "6")
+	# DazPythonBridgeCore (PluginStatusManager, InlineRunner, AuthenticationService,
+	# SecureRandom -- all the pane's non-SDK helper classes) is built against plain
+	# Qt6, same as SDK6's own Qt6 devkit here, so linking it in is ABI-safe. SDK4
+	# builds against Qt 4.8 instead: mixing that with Qt6-linked DazPythonBridgeCore
+	# is not safe, so this link is intentionally SDK6-only for now.
+	target_link_libraries(DzPythonBridge PRIVATE DazPythonBridgeCore)
+endif()
 
 target_compile_definitions(DzPythonBridge PRIVATE
 	DAZ_SDK_MAJOR_VERSION=${DAZ_SDK_VERSION}

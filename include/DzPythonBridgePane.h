@@ -3,15 +3,18 @@
 #include <dzpane.h>
 
 #include "AuthenticationService.h"
+#include "InlineRunner.h"
 #include "PluginStatusManager.h"
 
 #if DAZ_SDK_MAJOR_VERSION >= 6
 // These widget classes moved from QtGui to QtWidgets in Qt5/6.
 #include <QtWidgets/qwidget.h>
 #include <QtWidgets/qtablewidget.h>
+#include <QtWidgets/qplaintextedit.h>
 #else
 #include <QtGui/qwidget.h>
 #include <QtGui/qtablewidget.h>
+#include <QtGui/qplaintextedit.h>
 #endif
 
 class QPushButton;
@@ -38,6 +41,8 @@ private slots:
 	void onRestartClicked();
 	void onEnableClicked();
 	void onDisableClicked();
+	void onExecuteClicked();
+	void onRunFinished(bool success, const QString &resultJson, const QStringList &output, const QString &error);
 
 private:
 	QString selectedPluginId() const;
@@ -52,4 +57,12 @@ private:
 	QPushButton*           m_pDisableButton;
 	PluginStatusManager*   m_pStatusManager;
 	AuthenticationService  m_authService;
+
+	// Script-IDE-style inline execution pane (daz-python-bridge-sop.2): a code
+	// editor, an Execute button, and a read-only console showing print()
+	// output followed by the returned value or an error.
+	QPlainTextEdit*         m_pScriptEditor;
+	QPushButton*            m_pExecuteButton;
+	QPlainTextEdit*         m_pRunOutput;
+	InlineRunner*           m_pInlineRunner;
 };

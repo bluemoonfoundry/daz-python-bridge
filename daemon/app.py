@@ -7,22 +7,25 @@ Launched by DaemonProcess (src/DaemonProcess.cpp) as:
 Always bound to loopback by the launcher — this app does not decide its own
 bind address. /health is intentionally unauthenticated (liveness probe, no
 sensitive data); every other route requires X-DPB-Token (daz-python-bridge-sop.7).
-The /run inline-scripting endpoint is added by daz-python-bridge-sop.2; this
-app currently covers /health and /plugins/* (daz-python-bridge-sop.6), which
-DSS's plugin status pane polls via QNetworkAccessManager.
+/plugins/* (daz-python-bridge-sop.6) is what DSS's plugin status pane polls
+via QNetworkAccessManager; /run (daz-python-bridge-sop.2) is the inline
+scripting endpoint behind DSS's Script-IDE-style pane, see inline_runner.py.
 """
 
 import os
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from pydantic import BaseModel
 
 from . import paths
 from .auth import require_token
+from .inline_runner import run_inline
 from .plugin_registry import DazPluginNotReadyError, PluginNotFoundError, PluginRegistry
 from .worker_manager import WorkerFailedError, WorkerManager
 
 app = FastAPI(title="Daz Python Bridge Daemon")
 plugins_router = APIRouter(dependencies=[Depends(require_token)])
+run_router = APIRouter(dependencies=[Depends(require_token)])
 
 
 def _build_command(plugin_id: str) -> list[str]:
@@ -39,6 +42,15 @@ plugin_registry = PluginRegistry(plugins_dir=paths.plugins_dir(), worker_manager
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+class RunRequest(BaseModel):
+    code: str
+
+
+@run_router.post("/run")
+def run(request: RunRequest) -> dict:
+    return run_inline(request.code)
 
 
 @plugins_router.get("/plugins")
@@ -91,3 +103,4 @@ def disable_plugin(plugin_id: str) -> dict:
 
 
 app.include_router(plugins_router)
+app.include_router(run_router)

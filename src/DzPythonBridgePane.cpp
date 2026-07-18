@@ -86,6 +86,31 @@ DzPythonBridgePane::DzPythonBridgePane()
 	connect(m_pEnableButton, &QPushButton::clicked, this, &DzPythonBridgePane::onEnableClicked);
 	connect(m_pDisableButton, &QPushButton::clicked, this, &DzPythonBridgePane::onDisableClicked);
 
+	// ─── Script-IDE-style inline execution section (daz-python-bridge-sop.2) ───
+	QFrame* runSep = new QFrame(this);
+	runSep->setFrameShape(QFrame::HLine);
+	runSep->setFrameShadow(QFrame::Sunken);
+
+	QLabel* runLabel = new QLabel("Run Python (isolated run_venv)", m_pContentContainer);
+
+	m_pScriptEditor = new QPlainTextEdit(m_pContentContainer);
+	m_pScriptEditor->setPlaceholderText("print('hello')\nresult = 1 + 1\nresult");
+	m_pScriptEditor->setTabStopDistance(4 * m_pScriptEditor->fontMetrics().horizontalAdvance(' '));
+
+	m_pExecuteButton = new QPushButton("Execute", m_pContentContainer);
+
+	m_pRunOutput = new QPlainTextEdit(m_pContentContainer);
+	m_pRunOutput->setReadOnly(true);
+	m_pRunOutput->setPlaceholderText("Output and result appear here.");
+
+	contentLayout->addWidget(runSep);
+	contentLayout->addWidget(runLabel);
+	contentLayout->addWidget(m_pScriptEditor);
+	contentLayout->addWidget(m_pExecuteButton);
+	contentLayout->addWidget(m_pRunOutput);
+
+	connect(m_pExecuteButton, &QPushButton::clicked, this, &DzPythonBridgePane::onExecuteClicked);
+
 	// DSS is the sole generator for the daemon's token (daz-python-bridge-sop.7);
 	// the daemon only ever reads dazpythonbridge_token.txt at its own startup.
 	QStringList authMessages;
@@ -98,6 +123,10 @@ DzPythonBridgePane::DzPythonBridgePane()
 	connect(m_pStatusManager, &PluginStatusManager::actionFinished,
 	        this, &DzPythonBridgePane::onActionFinished);
 	m_pStatusManager->start(kPollIntervalMs);
+
+	m_pInlineRunner = new InlineRunner(this);
+	m_pInlineRunner->setAuthToken(m_authService.getToken());
+	connect(m_pInlineRunner, &InlineRunner::runFinished, this, &DzPythonBridgePane::onRunFinished);
 
 	QVBoxLayout* mainLayout = new QVBoxLayout(this);
 	mainLayout->setContentsMargins(4, 4, 4, 4);
@@ -160,5 +189,23 @@ void DzPythonBridgePane::onStopClicked() { performActionOnSelection(PluginStatus
 void DzPythonBridgePane::onRestartClicked() { performActionOnSelection(PluginStatusManager::Action::Restart); }
 void DzPythonBridgePane::onEnableClicked() { performActionOnSelection(PluginStatusManager::Action::Enable); }
 void DzPythonBridgePane::onDisableClicked() { performActionOnSelection(PluginStatusManager::Action::Disable); }
+
+void DzPythonBridgePane::onExecuteClicked() {
+	m_pExecuteButton->setEnabled(false);
+	m_pRunOutput->setPlainText("Running...");
+	m_pInlineRunner->execute(m_pScriptEditor->toPlainText());
+}
+
+void DzPythonBridgePane::onRunFinished(bool success, const QString &resultJson,
+                                        const QStringList &output, const QString &error) {
+	m_pExecuteButton->setEnabled(true);
+
+	QString text = output.join("\n");
+	if (!text.isEmpty()) {
+		text += "\n";
+	}
+	text += success ? QString("=> %1").arg(resultJson) : QString("Error: %1").arg(error);
+	m_pRunOutput->setPlainText(text);
+}
 
 #include "moc_DzPythonBridgePane.cpp"
