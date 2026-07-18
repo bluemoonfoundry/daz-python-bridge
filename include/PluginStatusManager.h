@@ -33,6 +33,11 @@ public:
 	void start(int intervalMs = 2000);
 	void stop();
 
+	// Attaches X-DPB-Token to every request this class makes (daz-python-bridge-sop.7).
+	// Must be set before start()/performAction() for the daemon to accept them,
+	// since /plugins/* rejects requests without a valid token.
+	void setAuthToken(const QString &token) { m_authToken = token; }
+
 	enum class Action { Start, Stop, Restart, Enable, Disable };
 	Q_ENUM(Action)
 
@@ -60,4 +65,5 @@ private:
 	QNetworkAccessManager *m_networkManager = nullptr;
 	QTimer m_timer;
 	bool m_requestInFlight = false;
+	QString m_authToken;
 };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QString>
 #include <QTimer>
 
 class QNetworkAccessManager;
@@ -24,6 +25,11 @@ public:
 	void stop();
 	bool isUp() const { return m_isUp; }
 
+	// Attaches X-DPB-Token to outbound requests (daz-python-bridge-sop.7).
+	// /health itself doesn't require it, but sending it is harmless and keeps
+	// this class consistent with PluginStatusManager's authenticated calls.
+	void setAuthToken(const QString &token) { m_authToken = token; }
+
 signals:
 	// Fires only on state transitions, not on every poll.
 	void healthUp();
@@ -38,4 +44,5 @@ private:
 	QTimer m_timer;
 	bool m_isUp = false;
 	bool m_requestInFlight = false;
+	QString m_authToken;
 };

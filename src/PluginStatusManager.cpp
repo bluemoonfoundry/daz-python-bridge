@@ -51,6 +51,9 @@ void PluginStatusManager::refresh() {
 	m_requestInFlight = true;
 
 	QNetworkRequest request(QUrl(baseUrl() + "/plugins"));
+	if (!m_authToken.isEmpty()) {
+		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
+	}
 	QNetworkReply *reply = m_networkManager->get(request);
 	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
 		onListReplyFinished(reply);
@@ -92,6 +95,9 @@ QString PluginStatusManager::actionPath(Action action) {
 
 void PluginStatusManager::performAction(const QString &pluginId, Action action) {
 	QNetworkRequest request(QUrl(baseUrl() + "/plugins/" + pluginId + "/" + actionPath(action)));
+	if (!m_authToken.isEmpty()) {
+		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
+	}
 	QNetworkReply *reply = m_networkManager->post(request, QByteArray());
 	connect(reply, &QNetworkReply::finished, this, [this, reply, pluginId, action]() {
 		onActionReplyFinished(reply, pluginId, action);

@@ -86,7 +86,13 @@ DzPythonBridgePane::DzPythonBridgePane()
 	connect(m_pEnableButton, &QPushButton::clicked, this, &DzPythonBridgePane::onEnableClicked);
 	connect(m_pDisableButton, &QPushButton::clicked, this, &DzPythonBridgePane::onDisableClicked);
 
+	// DSS is the sole generator for the daemon's token (daz-python-bridge-sop.7);
+	// the daemon only ever reads dazpythonbridge_token.txt at its own startup.
+	QStringList authMessages;
+	m_authService.loadOrGenerateToken(authMessages);
+
 	m_pStatusManager = new PluginStatusManager(this);
+	m_pStatusManager->setAuthToken(m_authService.getToken());
 	connect(m_pStatusManager, &PluginStatusManager::pluginsUpdated,
 	        this, &DzPythonBridgePane::onPluginsUpdated);
 	connect(m_pStatusManager, &PluginStatusManager::actionFinished,

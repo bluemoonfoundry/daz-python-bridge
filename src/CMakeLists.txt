@@ -14,6 +14,8 @@ add_library(DazPythonBridgeCore STATIC
 	PluginDependencyInstaller.cpp
 	PluginInstaller.cpp
 	PluginStatusManager.cpp
+	SecureRandom.cpp
+	AuthenticationService.cpp
 	miniz.c
 	../include/DaemonPaths.h
 	../include/UvBootstrapper.h
@@ -23,6 +25,8 @@ add_library(DazPythonBridgeCore STATIC
 	../include/PluginDependencyInstaller.h
 	../include/PluginInstaller.h
 	../include/PluginStatusManager.h
+	../include/SecureRandom.h
+	../include/AuthenticationService.h
 	../include/common_version.h
 	miniz.h
 )

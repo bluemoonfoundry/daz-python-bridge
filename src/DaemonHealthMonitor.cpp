@@ -30,6 +30,9 @@ void DaemonHealthMonitor::poll() {
 	m_requestInFlight = true;
 
 	QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/health").arg(DaemonProcess::kPort)));
+	if (!m_authToken.isEmpty()) {
+		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
+	}
 	QNetworkReply *reply = m_networkManager->get(request);
 	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
 		onReplyFinished(reply);

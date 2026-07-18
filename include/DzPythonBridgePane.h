@@ -2,6 +2,7 @@
 
 #include <dzpane.h>
 
+#include "AuthenticationService.h"
 #include "PluginStatusManager.h"
 
 #if DAZ_SDK_MAJOR_VERSION >= 6
@@ -50,4 +51,5 @@ private:
 	QPushButton*           m_pEnableButton;
 	QPushButton*           m_pDisableButton;
 	PluginStatusManager*   m_pStatusManager;
+	AuthenticationService  m_authService;
 };
