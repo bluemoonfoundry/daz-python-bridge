@@ -11,12 +11,16 @@ add_library(DazPythonBridgeCore STATIC
 	DaemonProcess.cpp
 	DaemonHealthMonitor.cpp
 	ZipInstaller.cpp
+	PluginDependencyInstaller.cpp
+	PluginInstaller.cpp
 	miniz.c
 	../include/DaemonPaths.h
 	../include/UvBootstrapper.h
 	../include/DaemonProcess.h
 	../include/DaemonHealthMonitor.h
 	../include/ZipInstaller.h
+	../include/PluginDependencyInstaller.h
+	../include/PluginInstaller.h
 	../include/common_version.h
 	miniz.h
 )
@@ -37,6 +41,12 @@ target_link_libraries(DazPythonBridgeCore
 # Builds standalone (no DAZ SDK) alongside DazPythonBridgeCore.
 add_executable(test_zip_installer ../tests/cpp/test_zip_installer.cpp)
 target_link_libraries(test_zip_installer PRIVATE DazPythonBridgeCore)
+
+# Manual/CI test harness for PluginDependencyInstaller — see
+# tests/cpp/test_plugin_dependency_installer.cpp. Requires `uv` on PATH and
+# network access to resolve packages; not wired into CTest.
+add_executable(test_plugin_dependency_installer ../tests/cpp/test_plugin_dependency_installer.cpp)
+target_link_libraries(test_plugin_dependency_installer PRIVATE DazPythonBridgeCore)
 
 # ─── DzPythonBridge: DSS plugin (pane) ────────────────────────────────────────
 #

@@ -6,8 +6,8 @@
 //
 //   <base>/bin/uv[.exe]           the vendored uv binary
 //   <base>/run_venv/              isolated venv for the /run inline-scripting endpoint
-//   <base>/plugins/<id>/venv/     one isolated venv per installed plugin (created lazily,
-//                                 NOT here — see per-plugin venv isolation work)
+//   <base>/plugins/<id>/venv/     one isolated venv per installed plugin, created eagerly
+//                                 at install time by PluginDependencyInstaller, not here
 //
 // <base> is QStandardPaths::AppDataLocation + "/DazPythonBridge", i.e.
 // AppData/Daz 3D/Studio4/DazPythonBridge on Windows, since the host DAZ Studio

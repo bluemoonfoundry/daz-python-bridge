@@ -10,8 +10,8 @@
 //   3. `uv venv` DaemonPaths::runVenvDir() bound to Python 3.11
 //   4. `uv pip install` fastapi + uvicorn into that venv
 //
-// Per-plugin venvs are NOT created here — those are created lazily elsewhere,
-// one per installed plugin, at install time.
+// Per-plugin venvs are NOT created here — see PluginDependencyInstaller, which
+// creates one per installed plugin, eagerly at install time.
 //
 // Every step runs a QProcess asynchronously (never blocks the caller's thread);
 // steps are chained off QProcess::finished so this is safe to drive from the
