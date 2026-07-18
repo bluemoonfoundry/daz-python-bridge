@@ -1,0 +1,13 @@
+[project]
+name = "daz-python-bridge-daemon"
+version = "0.1.0"
+description = "DPB daemon: FastAPI service DAZ Studio calls into on 127.0.0.1:18812"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

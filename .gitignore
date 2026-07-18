@@ -3,3 +3,17 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Build output
+build/
+build_test/
+CMakeCache.txt
+CMakeFiles/
+
+# Python
+__pycache__/
+*.pyc
+.verify_venv/
+run_venv/
+.venv/
+
