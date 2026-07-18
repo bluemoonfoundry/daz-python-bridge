@@ -53,18 +53,75 @@ bd close <id>         # Complete work
 
 ## Build & Test
 
-_Add your build and test commands here_
-
+**Daemon (Python, daemon/):**
 ```bash
-# Example:
-# npm install
-# npm test
+pip install -e ".[test]"
+pytest
 ```
+
+**DSS plugin (C++, requires the DAZ Studio SDK + Qt6 devkit):**
+```bash
+./build.sh                        # configure + build only, SDK4 (default)
+./build.sh install                # + copy DLL into DAZ_STUDIO_EXE_DIR/plugins
+./build.sh install --sdk-version 6
+./build.sh --help                 # full option list
+```
+Reads `DAZ_SDK_DIR`, `DAZ_SDK_DIR_V6`, `QT6_DIR`, `DAZ_STUDIO_EXE_DIR`,
+`DAZ_STUDIO_EXE_DIR_V6` from a local `.env` (gitignored, machine-specific
+paths). `QT6_DIR` is required for every build, not just `--sdk-version 6` --
+`DazPythonBridgeCore` (the SDK-independent bootstrap/zip-install/daemon-client
+backend) is always built against plain Qt6, even when the DSS plugin itself
+links Qt4 for SDK4. `install` refuses to run while DAZ Studio is open (it
+locks the DLL).
+
+**Core-only C++ (no DAZ SDK, standalone via `build_test/`):**
+```bash
+cmake -B build_test -S . -DQt6_DIR=<qt6-cmake-dir>
+cmake --build build_test --config Release
+```
+Builds `DazPythonBridgeCore` plus its manual test harnesses
+(`test_zip_installer`, `test_plugin_dependency_installer`,
+`test_plugin_installer` — not wired into CTest; run the `.exe`s directly and
+check exit code/output). `test_plugin_dependency_installer` and
+`test_plugin_installer` need `uv` on PATH and network access.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Two DAZ Studio-facing pieces:
+- **`daemon/`**: a FastAPI service DSS launches on 127.0.0.1:18812, running
+  inside an isolated `run_venv`. `/plugins/*` manages community Python
+  plugins (each gets its own venv + warm worker subprocess); `/run` executes
+  inline Python for the Script-IDE-style pane. Complements the existing
+  DazScript-facing daemon on port 18811 (DazScript-as-server) with the
+  reverse direction (DAZ calling into Python).
+- **`src/`/`include/`**: the DSS plugin pane (`DzPythonBridge`/SDK6,
+  `dsp_DazPythonBridge` name-prefixed for SDK6's plugin scanner). Splits into
+  `DazPythonBridgeCore` (Qt Core+Network only, no DAZ SDK dependency —
+  daemon bootstrap, hardened zip install, plugin/worker status polling,
+  inline-run HTTP client) and the SDK-dependent pane/registration code on
+  top. `DazPythonBridgeCore`'s sources are compiled twice: once into the
+  `DazPythonBridgeCore` static lib (Qt6, linked into the SDK6 plugin), and
+  once compiled directly into the SDK4 plugin target against Qt 4.8 — the two
+  Qt major versions aren't ABI-compatible, so the Qt6-built lib can't be
+  linked into the SDK4 DLL. `JsonStd.h`/`PortableFs.h` are what let the exact
+  same source files compile under either Qt version.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- Qt4/Qt6 dual compatibility in `src`/`include` (SDK4 predates Qt5): no
+  `QJsonDocument`/`QJsonObject`/`QJsonArray` (use `JsonStd.h`'s QVariant-based
+  `parseObject`/`variantToJson` instead), no `QDir::removeRecursively()` (use
+  `PortableFs.h`), no PMF-based `connect()` or lambda slots (old-style
+  `SIGNAL()`/`SLOT()` macros only — a lambda that needs the firing
+  `QNetworkReply*` back should become a real slot using `sender()`; extra
+  context beyond the reply itself travels via `QObject::setProperty()`), no
+  `QStringLiteral`/`QRegularExpression`/`QStandardPaths`/`QUuid::WithoutBraces`/
+  `QStringList` brace-init/`QFileInfo::exists(path)` static overload/
+  `QProcess::setProgram`+`setArguments`+`start()`. Guard anything else Qt5+
+  behind `#if DAZ_SDK_MAJOR_VERSION >= 6`. Verify against the real SDK
+  (`./build.sh install --sdk-version 4`) before assuming something compiles —
+  Qt4/Qt5+ incompatibilities here have repeatedly turned out bigger or
+  different than they look from documentation alone.
+- `daemon/` code has no DAZ SDK dependency and is tested purely via pytest
+  against a `TestClient`; C++ SDK-independent code (`DazPythonBridgeCore`) is
+  tested via manual harnesses in `tests/cpp/`, not CTest.

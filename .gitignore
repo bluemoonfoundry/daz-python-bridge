@@ -6,9 +6,13 @@
 
 # Build output
 build/
+build-sdk6/
 build_test/
 CMakeCache.txt
 CMakeFiles/
+
+# Local machine paths (SDK/Qt dirs, DAZ Studio install location)
+.env*
 
 # Python
 __pycache__/
