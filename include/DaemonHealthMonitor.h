@@ -20,8 +20,9 @@ class DaemonHealthMonitor : public QObject {
 public:
 	explicit DaemonHealthMonitor(QObject *parent = nullptr);
 
-	// intervalMs: how often to poll. Defaults to 2000ms.
-	void start(int intervalMs = 2000);
+	// intervalMs: how often to poll. Defaults to 5000ms -- a status pane has
+	// no need to detect the daemon going down/up faster than that.
+	void start(int intervalMs = 5000);
 	void stop();
 	bool isUp() const { return m_isUp; }
 

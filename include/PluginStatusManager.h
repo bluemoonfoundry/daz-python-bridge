@@ -29,8 +29,11 @@ class PluginStatusManager : public QObject {
 public:
 	explicit PluginStatusManager(QObject *parent = nullptr);
 
-	// intervalMs: how often to poll GET /plugins. Defaults to 2000ms.
-	void start(int intervalMs = 2000);
+	// intervalMs: how often to poll GET /plugins. Defaults to 5000ms --
+	// performAction() already triggers an immediate refresh() independent of
+	// this timer, so it only needs to catch background state changes (e.g. an
+	// async install finishing), not user-initiated ones.
+	void start(int intervalMs = 5000);
 	void stop();
 
 	// Attaches X-DPB-Token to every request this class makes (daz-python-bridge-sop.7).

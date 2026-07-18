@@ -22,7 +22,13 @@
 
 namespace {
 
-const int kPollIntervalMs = 2000;
+// User-triggered changes (Start/Stop/etc., a drag-drop install finishing)
+// already trigger an immediate refresh() independent of these timers, so
+// these only need to catch background/crash state -- no reason for either
+// to poll sub-5s, and the daemon being briefly unreachable isn't worth
+// flagging faster than that either.
+const int kPluginPollIntervalMs = 5000;
+const int kHealthPollIntervalMs = 5000;
 const int kColPlugin = 0;
 const int kColState = 1;
 const int kColPid = 2;
@@ -173,7 +179,7 @@ DzPythonBridgePane::DzPythonBridgePane()
 	m_pHealthMonitor->setAuthToken(m_authService.getToken());
 	connect(m_pHealthMonitor, SIGNAL(healthUp()), this, SLOT(onHealthUp()));
 	connect(m_pHealthMonitor, SIGNAL(healthDown()), this, SLOT(onHealthDown()));
-	m_pHealthMonitor->start(kPollIntervalMs);
+	m_pHealthMonitor->start(kHealthPollIntervalMs);
 
 	// daemon/ + pyproject.toml are bundled at resources/BlueMoonFoundry/
 	// DazPythonBridge/ (sibling to plugins/, alongside this DLL) by
@@ -199,7 +205,7 @@ DzPythonBridgePane::DzPythonBridgePane()
 	// qualified name here would silently fail to match at connect() time.
 	connect(m_pStatusManager, SIGNAL(actionFinished(QString, Action, bool, QString)),
 	        this, SLOT(onActionFinished(QString, PluginStatusManager::Action, bool, QString)));
-	m_pStatusManager->start(kPollIntervalMs);
+	m_pStatusManager->start(kPluginPollIntervalMs);
 
 	m_pInlineRunner = new InlineRunner(this);
 	m_pInlineRunner->setAuthToken(m_authService.getToken());
