@@ -7,9 +7,13 @@ Launched by DaemonProcess (src/DaemonProcess.cpp) as:
 Always bound to loopback by the launcher — this app does not decide its own
 bind address. /health is intentionally unauthenticated (liveness probe, no
 sensitive data); every other route requires X-DPB-Token (daz-python-bridge-sop.7).
-/plugins/* (daz-python-bridge-sop.6) is what DSS's plugin status pane polls
-via QNetworkAccessManager; /run (daz-python-bridge-sop.2) is the inline
-scripting endpoint behind DSS's Script-IDE-style pane, see inline_runner.py.
+/plugins/{start,stop,restart,enable,disable} (daz-python-bridge-sop.6) is
+what DSS's plugin status pane polls/drives via QNetworkAccessManager, purely
+for admin/observability -- /plugins/{id}/call is the actual DazScript-facing
+usage path (a DazScript action calling OUT to this daemon via DzHttpHelper,
+see call_plugin()'s docstring for the client-side sketch). /run
+(daz-python-bridge-sop.2) is the separate inline scripting endpoint behind
+DSS's Script-IDE-style pane, see inline_runner.py.
 """
 
 import os
@@ -110,6 +114,51 @@ def enable_plugin(plugin_id: str) -> dict:
 @plugins_router.post("/plugins/{plugin_id}/disable")
 def disable_plugin(plugin_id: str) -> dict:
     return _do_action(plugin_id, plugin_registry.disable)
+
+
+class PluginCallRequest(BaseModel):
+    function: str
+    args: list = []
+    kwargs: dict = {}
+
+
+@plugins_router.post("/plugins/{plugin_id}/call")
+def call_plugin(plugin_id: str, request: PluginCallRequest) -> dict:
+    """Invokes one of an installed, running plugin's EXPOSED_FUNCTIONS. This is
+    the intended way DazScript code (running in DAZ Studio, port 18811) uses
+    an installed plugin -- calling OUT to this daemon via DzHttpHelper, the
+    reverse direction of dazpy's DazClient.execute() calling INTO DAZ Studio:
+
+        var http = new DzHttpHelper();
+        http.setHost("127.0.0.1:18812");
+        http.setPath("/plugins/hello_plugin/call");
+        http.setRequestMethod("POST");
+        http.setContentType("application/json");
+        http.setHeaderValues(["X-DPB-Token"], [token]);
+        var body = JSON.stringify({function: "hello", args: ["world"], kwargs: {}});
+        var responseBytes = http.doSynchronousRequest(body);
+        var response = JSON.parse(responseBytes.toString());
+        if (response.success) { print(response.result); } else { print(response.error); }
+
+    Plugin-level failures (an unknown function name, or the plugin's own
+    function raising) are NOT HTTPExceptions -- they come back as a normal
+    200 with success:false, the same {success, result, error} envelope /run
+    uses, since from the caller's perspective a plugin's own exception is an
+    expected, handleable outcome of calling into user code, not a daemon
+    failure. Daemon/infrastructure problems (unknown plugin, not ready yet,
+    worker crashed) still raise HTTPException via _do_action's convention.
+    """
+    try:
+        result = plugin_registry.call(plugin_id, request.function, request.args, request.kwargs)
+        return {"success": True, "result": result, "error": ""}
+    except PluginNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Unknown plugin '{plugin_id}'")
+    except DazPluginNotReadyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except WorkerFailedError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except RuntimeError as exc:
+        return {"success": False, "result": None, "error": str(exc)}
 
 
 app.include_router(plugins_router)

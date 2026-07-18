@@ -19,12 +19,19 @@ the parent can bound the visible cold-start latency (see WorkerManager._ensure_w
 A plugin function raising an exception is reported back as an error response and does
 NOT end the process — only the worker process actually dying counts as a crash for
 WorkerManager's restart-once-then-fail policy.
+
+A plugin function's own print() output is redirected away from the real stdout while
+it runs and discarded: this protocol's transport IS stdout, so a plugin author's
+ordinary print()-debugging would otherwise interleave raw text into the
+newline-delimited JSON stream and corrupt it for every call after.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 
@@ -73,7 +80,8 @@ def main() -> None:
             continue
 
         try:
-            result = func(*call_args, **call_kwargs)
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = func(*call_args, **call_kwargs)
             _send({"id": request_id, "ok": True, "result": result})
         except Exception as exc:  # plugin code is untrusted; report, don't crash the loop
             _send({

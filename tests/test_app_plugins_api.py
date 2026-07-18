@@ -150,6 +150,50 @@ def test_plugins_list_rejects_wrong_token(client):
     assert resp.status_code == 401
 
 
+def test_call_plugin_invokes_exposed_function(client):
+    c, tmp_path = client
+    _make_plugin_dir(tmp_path, "p1")
+
+    # call() lazily spawns the worker itself (same as WorkerManager.call in
+    # general) -- no explicit /start needed first.
+    resp = c.post("/plugins/p1/call", json={"function": "echo", "args": ["hi"], "kwargs": {}})
+    assert resp.status_code == 200
+    assert resp.json() == {"success": True, "result": "hi", "error": ""}
+
+
+def test_call_plugin_unknown_function_is_200_with_success_false(client):
+    c, tmp_path = client
+    _make_plugin_dir(tmp_path, "p1")
+
+    resp = c.post("/plugins/p1/call", json={"function": "does_not_exist"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert "does_not_exist" in body["error"]
+
+
+def test_call_plugin_on_unknown_plugin_is_404(client):
+    c, _ = client
+    resp = c.post("/plugins/nope/call", json={"function": "echo"})
+    assert resp.status_code == 404
+
+
+def test_call_plugin_on_disabled_plugin_returns_409(client):
+    c, tmp_path = client
+    _make_plugin_dir(tmp_path, "p1")
+
+    c.post("/plugins/p1/disable")
+    resp = c.post("/plugins/p1/call", json={"function": "echo", "args": ["hi"]})
+    assert resp.status_code == 409
+
+
+def test_call_plugin_rejects_missing_token(client):
+    c, tmp_path = client
+    _make_plugin_dir(tmp_path, "p1")
+    resp = c.post("/plugins/p1/call", json={"function": "echo"}, headers={"X-DPB-Token": ""})
+    assert resp.status_code == 401
+
+
 def test_action_endpoint_rejects_missing_token(client):
     c, tmp_path = client
     _make_plugin_dir(tmp_path, "p1")

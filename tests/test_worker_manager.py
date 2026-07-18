@@ -207,6 +207,19 @@ def test_last_used_is_null_for_a_plugin_never_started():
         mgr.shutdown()
 
 
+def test_plugin_print_output_does_not_corrupt_the_rpc_protocol(manager):
+    # worker_runtime.py's JSON-RPC transport IS stdout, so a plugin's own
+    # print() calls (ordinary debugging, not malicious) must not leak onto
+    # it -- otherwise this call, and every call after it on the same warm
+    # worker, would see corrupted/misaligned JSON.
+    result1 = manager.call("p1", "noisy", args=["first"])
+    assert result1 == "first"
+
+    result2 = manager.call("p1", "echo", args=["still working"])
+    assert result2 == "still working"
+    assert manager.status("p1")["state"] == WorkerState.RUNNING.value
+
+
 def test_call_to_unknown_function_returns_error_without_crashing(manager):
     with pytest.raises(RuntimeError, match="No exposed function"):
         manager.call("p1", "does_not_exist")
