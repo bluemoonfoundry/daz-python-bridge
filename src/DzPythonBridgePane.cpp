@@ -15,7 +15,10 @@
 #include <QtGui/qpushbutton.h>
 #endif
 
+#include <dzapp.h>
+
 #include <QDateTime>
+#include <QDir>
 
 namespace {
 
@@ -172,8 +175,17 @@ DzPythonBridgePane::DzPythonBridgePane()
 	connect(m_pHealthMonitor, SIGNAL(healthDown()), this, SLOT(onHealthDown()));
 	m_pHealthMonitor->start(kPollIntervalMs);
 
+	// daemon/ + pyproject.toml are bundled at resources/BlueMoonFoundry/
+	// DazPythonBridge/ (sibling to plugins/, alongside this DLL) by
+	// `build.sh install`, mirroring how other BlueMoonFoundry DSS plugins
+	// (e.g. ContentBrowser) ship external resources -- not under
+	// DaemonPaths::baseDir() (the writable per-user AppData tree), which only
+	// ever holds generated state (run_venv, per-plugin venvs), never source.
+	const QString daemonSourceDir = QDir(dzApp->getResourcesPath()).filePath("BlueMoonFoundry/DazPythonBridge");
+	m_pBootstrapper->setDaemonSourceDir(daemonSourceDir);
+
 	setDaemonStatus("bootstrapping...", "#b8860b");
-	appendLog("PANE", "Starting daemon bootstrap");
+	appendLog("PANE", QString("Starting daemon bootstrap (daemon source: %1)").arg(daemonSourceDir));
 	m_pBootstrapper->ensureReady();
 
 	m_pStatusManager = new PluginStatusManager(this);

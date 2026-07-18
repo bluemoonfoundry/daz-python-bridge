@@ -10,6 +10,11 @@
 UvBootstrapper::UvBootstrapper(QObject *parent) : QObject(parent) {}
 
 void UvBootstrapper::ensureReady() {
+	if (m_daemonSourceDir.isEmpty()) {
+		fail("ensure-base-dir", QString::fromLatin1(
+			"setDaemonSourceDir() was not called before ensureReady()"));
+		return;
+	}
 	if (!DaemonPaths::ensureBaseDirExists()) {
 		fail("ensure-base-dir", QString::fromLatin1("could not create %1").arg(DaemonPaths::baseDir()));
 		return;
@@ -126,7 +131,12 @@ void UvBootstrapper::onCreateVenvFinished(int exitCode, QProcess::ExitStatus sta
 	installDeps();
 }
 
-// ─── Step 4: install the daemon's own dependencies into run_venv ────────────
+// ─── Step 4: install the daemon package itself (+ its deps) into run_venv ───
+// Installs daemonSourceDir as a real package rather than naming fastapi/
+// uvicorn by hand, so `daemon` (the module uvicorn is launched against, see
+// DaemonProcess) is genuinely importable regardless of the daemon process's
+// working directory. --reinstall so edits to the bundled daemon source are
+// picked up on every launch, not just the first time the venv is created.
 
 void UvBootstrapper::installDeps() {
 	emit stepStarted("install-deps");
@@ -134,7 +144,7 @@ void UvBootstrapper::installDeps() {
 	m_process = new QProcess(this);
 	const QStringList arguments = QStringList()
 		<< "pip" << "install" << "--python" << venvPythonPath()
-		<< "fastapi" << "uvicorn[standard]";
+		<< "--reinstall" << m_daemonSourceDir;
 
 	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
 	        this, SLOT(onInstallDepsFinished(int, QProcess::ExitStatus)));

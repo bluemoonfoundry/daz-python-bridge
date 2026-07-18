@@ -8,7 +8,11 @@
 //      if not already present there.
 //   2. `uv python install 3.11`
 //   3. `uv venv` DaemonPaths::runVenvDir() bound to Python 3.11
-//   4. `uv pip install` fastapi + uvicorn into that venv
+//   4. `uv pip install <daemonSourceDir>` into that venv -- installs the
+//      actual daemon/ package (plus its fastapi/uvicorn/psutil dependencies,
+//      all declared in daemonSourceDir's pyproject.toml) as a real importable
+//      package, rather than the daemon module needing to sit on the process's
+//      cwd/PYTHONPATH. See setDaemonSourceDir().
 //
 // Per-plugin venvs are NOT created here — see PluginDependencyInstaller, which
 // creates one per installed plugin, eagerly at install time.
@@ -22,8 +26,19 @@ class UvBootstrapper : public QObject {
 public:
 	explicit UvBootstrapper(QObject *parent = nullptr);
 
+	// Directory containing the daemon's own source (a daemon/ package
+	// alongside pyproject.toml) that step 4 installs into run_venv. Must be
+	// set before ensureReady() is called. The DSS-facing caller resolves this
+	// via dzApp->getResourcesPath() + "/BlueMoonFoundry/DazPythonBridge" --
+	// this class has no DAZ SDK dependency of its own, so it takes the
+	// resolved path as a plain string instead (daz-python-bridge-5l4 follow-up:
+	// build.sh install bundles daemon/ + pyproject.toml there, mirroring how
+	// other BlueMoonFoundry DSS plugins ship external Python resources).
+	void setDaemonSourceDir(const QString &dir) { m_daemonSourceDir = dir; }
+
 	// Idempotent — safe to call repeatedly (e.g. on every pane open); steps
-	// already satisfied are skipped.
+	// already satisfied are skipped. install-deps (step 4) always re-runs
+	// uv pip install, so daemon source edits are picked up on every launch.
 	void ensureReady();
 
 signals:
@@ -53,4 +68,5 @@ private:
 	void fail(const QString &step, QProcess *process);
 
 	QProcess *m_process = nullptr;
+	QString m_daemonSourceDir;
 };

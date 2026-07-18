@@ -199,6 +199,21 @@ if [ "$COMMAND" = "install" ]; then
     fi
     echo "Building ($BUILD_CONFIG) and installing to DAZ Studio plugins folder..."
     "$CMAKE" "${BUILD_ARGS[@]}"
+
+    # Bundle the daemon's own Python source (daemon/ + pyproject.toml) at
+    # resources/BlueMoonFoundry/DazPythonBridge/, sibling to plugins/ --
+    # mirroring how other BlueMoonFoundry DSS plugins (e.g. ContentBrowser)
+    # ship external resources next to the DLL. UvBootstrapper's install-deps
+    # step `uv pip install`s from here (resolved at runtime via
+    # dzApp->getResourcesPath()) so `daemon` is a real importable package
+    # regardless of the daemon process's working directory.
+    RESOURCES_DIR="$DAZ_STUDIO_EXE_DIR/resources/BlueMoonFoundry/DazPythonBridge"
+    echo "Bundling daemon/ source into $RESOURCES_DIR..."
+    rm -rf "$RESOURCES_DIR/daemon"
+    mkdir -p "$RESOURCES_DIR"
+    cp -r "$SCRIPT_DIR/daemon" "$RESOURCES_DIR/daemon"
+    find "$RESOURCES_DIR/daemon" -name "__pycache__" -exec rm -rf {} + 2>/dev/null
+    cp "$SCRIPT_DIR/pyproject.toml" "$RESOURCES_DIR/pyproject.toml"
 else
     echo "Building ($BUILD_CONFIG)..."
     "$CMAKE" "${BUILD_ARGS[@]}"
