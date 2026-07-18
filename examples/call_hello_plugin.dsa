@@ -1,0 +1,73 @@
+// Calls examples/hello_plugin's exposed functions (hello, add, boom) over
+// the DPB daemon's POST /plugins/{id}/call endpoint via DzHttpHelper -- the
+// intended way DazScript uses an installed DPB plugin (see
+// daemon/app.py's call_plugin() docstring for the canonical client sketch
+// this mirrors; the pane's Start/Stop/etc. controls are admin-only and
+// never invoke a plugin's own functions).
+//
+// Prerequisites:
+//   - The Daz Python Bridge pane has been opened at least once this
+//     session (that's what bootstraps/launches the daemon on 18812).
+//   - examples/hello_plugin is installed (see examples/README.md) --
+//     no need to Start it first, /call spawns its worker lazily on first
+//     use, same as the pane's own Start button does.
+
+function readToken() {
+	var tokenPath = dzApp.getHomePath() + "/.daz3d/dazpythonbridge_token.txt";
+	var oFile = new DzFile(tokenPath);
+	if (!oFile.open(DzFile.ReadOnly)) {
+		print("ERROR: could not open token file: " + tokenPath);
+		return "";
+	}
+	var token = oFile.read();
+	oFile.close();
+	// Strip the trailing newline/whitespace auth.py's token file always has.
+	return token.replace(/^\s+|\s+$/g, "");
+}
+
+function callPlugin(pluginId, functionName, args, kwargs) {
+	var http = new DzHttpHelper();
+	http.setHost("127.0.0.1:18812");
+	http.setPath("/plugins/" + pluginId + "/call");
+	http.setRequestMethod("POST");
+	http.setContentType("application/json");
+	http.setHeaderValues(["X-DPB-Token"], [readToken()]);
+
+	var body = JSON.stringify({
+		"function": functionName,
+		"args": args || [],
+		"kwargs": kwargs || {}
+	});
+
+	var responseBytes = http.doSynchronousRequest(body);
+	var errorMessage = http.getError();
+	if (errorMessage != "") {
+		print("HTTP error calling " + pluginId + "." + functionName + "(): " + errorMessage);
+		return null;
+	}
+
+	return JSON.parse(responseBytes.toString());
+}
+
+function reportResult(label, response) {
+	if (response === null) {
+		print(label + ": no response (see HTTP error above)");
+	} else if (response.success) {
+		print(label + " => " + JSON.stringify(response.result));
+	} else {
+		print(label + " FAILED: " + response.error);
+	}
+}
+
+// hello(name="world")
+reportResult("hello('DazScript')", callPlugin("hello_plugin", "hello", ["DazScript"]));
+
+// add(a, b)
+reportResult("add(2, 3)", callPlugin("hello_plugin", "add", [2, 3]));
+
+// boom() deliberately raises inside the plugin -- exercises the
+// success:false envelope path, not an HTTP-level error.
+reportResult("boom()", callPlugin("hello_plugin", "boom", []));
+
+// Calling a function the plugin doesn't expose at all.
+reportResult("nope()", callPlugin("hello_plugin", "nope", []));
