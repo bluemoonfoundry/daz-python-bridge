@@ -1,11 +1,8 @@
 #include "InlineRunner.h"
 
 #include "DaemonProcess.h"
+#include "JsonStd.h"
 
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonValue>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -14,21 +11,17 @@
 namespace {
 
 QString baseUrl() {
-	return QStringLiteral("http://127.0.0.1:%1").arg(DaemonProcess::kPort);
+	return QString::fromLatin1("http://127.0.0.1:%1").arg(DaemonProcess::kPort);
 }
 
-QString jsonText(const QJsonValue &value) {
-	if (value.isString()) {
+QString jsonText(const QVariant &value) {
+	if (value.type() == QVariant::String) {
 		return value.toString();
 	}
-	if (value.isNull() || value.isUndefined()) {
-		return QStringLiteral("null");
+	if (!value.isValid() || value.isNull()) {
+		return QString::fromLatin1("null");
 	}
-	// Numbers/bools/objects/arrays: round-trip through a single-element array
-	// so QJsonDocument can serialize any JSON value type, not just objects.
-	QJsonArray wrapper{value};
-	QByteArray wrapped = QJsonDocument(wrapper).toJson(QJsonDocument::Compact);
-	return QString::fromUtf8(wrapped.mid(1, wrapped.size() - 2));
+	return QString::fromStdString(JsonStd::variantToJson(value));
 }
 
 } // namespace
@@ -49,45 +42,55 @@ void InlineRunner::execute(const QString &code) {
 		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
 	}
 
-	QJsonObject body;
+	QVariantMap body;
 	body["code"] = code;
-	QByteArray payload = QJsonDocument(body).toJson(QJsonDocument::Compact);
+	const QByteArray payload = JsonStd::variantToJsonBytes(body);
 
 	QNetworkReply *reply = m_networkManager->post(request, payload);
-	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-		onReplyFinished(reply);
-	});
+	// Old-style SIGNAL()/SLOT() connect -- see the header comment on
+	// onReplyFinished().
+	connect(reply, SIGNAL(finished()), this, SLOT(onReplyFinished()));
 }
 
-void InlineRunner::onReplyFinished(QNetworkReply *reply) {
+void InlineRunner::onReplyFinished() {
+	QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+	if (!reply) {
+		return;
+	}
+
 	m_requestInFlight = false;
 	reply->deleteLater();
 
 	if (reply->error() != QNetworkReply::NoError) {
 		QString errorMessage = reply->errorString();
-		const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-		if (doc.isObject() && doc.object().contains("detail")) {
-			errorMessage = doc.object().value("detail").toString();
+		QVariantMap body;
+		std::string parseError;
+		if (JsonStd::parseObject(reply->readAll(), body, parseError) && body.contains("detail")) {
+			errorMessage = body.value("detail").toString();
 		}
-		emit runFinished(false, QStringLiteral("null"), QStringList(), errorMessage);
+		emit runFinished(false, QString::fromLatin1("null"), QStringList(), errorMessage);
 		return;
 	}
 
-	const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-	if (!doc.isObject()) {
-		emit runFinished(false, QStringLiteral("null"), QStringList(),
-		                  QStringLiteral("Malformed response from daemon"));
+	QVariantMap body;
+	std::string parseError;
+	if (!JsonStd::parseObject(reply->readAll(), body, parseError)) {
+		emit runFinished(false, QString::fromLatin1("null"), QStringList(),
+		                  QString::fromLatin1("Malformed response from daemon"));
 		return;
 	}
 
-	const QJsonObject obj = doc.object();
-	const bool success = obj.value("success").toBool();
-	const QString resultJson = jsonText(obj.value("result"));
+	const bool success = body.value("success").toBool();
+	const QString resultJson = jsonText(body.value("result"));
 	QStringList output;
-	for (const QJsonValue &line : obj.value("output").toArray()) {
+	for (const QVariant &line : body.value("output").toList()) {
 		output.append(line.toString());
 	}
-	const QString error = obj.value("error").toString();
+	const QString error = body.value("error").toString();
 
 	emit runFinished(success, resultJson, output, error);
 }
+
+// Manually included -- see the comment in DaemonHealthMonitor.cpp
+// (daz-python-bridge-7wq).
+#include "moc_InlineRunner.cpp"

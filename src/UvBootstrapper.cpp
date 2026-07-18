@@ -11,7 +11,7 @@ UvBootstrapper::UvBootstrapper(QObject *parent) : QObject(parent) {}
 
 void UvBootstrapper::ensureReady() {
 	if (!DaemonPaths::ensureBaseDirExists()) {
-		fail("ensure-base-dir", QStringLiteral("could not create %1").arg(DaemonPaths::baseDir()));
+		fail("ensure-base-dir", QString::fromLatin1("could not create %1").arg(DaemonPaths::baseDir()));
 		return;
 	}
 	installUv();
@@ -37,7 +37,7 @@ QString UvBootstrapper::venvPythonPath() const {
 // ─── Step 1: install uv itself ────────────────────────────────────────────────
 
 void UvBootstrapper::installUv() {
-	if (QFileInfo::exists(DaemonPaths::uvBinaryPath())) {
+	if (QFileInfo(DaemonPaths::uvBinaryPath()).exists()) {
 		installPython();
 		return;
 	}
@@ -52,23 +52,24 @@ void UvBootstrapper::installUv() {
 	m_process->setProcessEnvironment(env);
 
 #ifdef Q_OS_WIN
-	m_process->setProgram("powershell.exe");
-	m_process->setArguments({
-		"-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-		"irm https://astral.sh/uv/install.ps1 | iex"
-	});
+	const QString program = "powershell.exe";
+	// QStringList() << ... , not a brace-init list: QStringList's
+	// initializer-list constructor is Qt5+ only (daz-python-bridge-7wq).
+	const QStringList arguments = QStringList()
+		<< "-NoProfile" << "-ExecutionPolicy" << "Bypass" << "-Command"
+		<< "irm https://astral.sh/uv/install.ps1 | iex";
 #else
-	m_process->setProgram("/bin/sh");
-	m_process->setArguments({"-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"});
+	const QString program = "/bin/sh";
+	const QStringList arguments = QStringList() << "-c" << "curl -LsSf https://astral.sh/uv/install.sh | sh";
 #endif
 
-	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-	        this, &UvBootstrapper::onInstallUvFinished);
-	m_process->start();
+	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
+	        this, SLOT(onInstallUvFinished(int, QProcess::ExitStatus)));
+	m_process->start(program, arguments);
 }
 
 void UvBootstrapper::onInstallUvFinished(int exitCode, QProcess::ExitStatus status) {
-	if (status != QProcess::NormalExit || exitCode != 0 || !QFileInfo::exists(DaemonPaths::uvBinaryPath())) {
+	if (status != QProcess::NormalExit || exitCode != 0 || !QFileInfo(DaemonPaths::uvBinaryPath()).exists()) {
 		fail("install-uv", m_process);
 		return;
 	}
@@ -82,12 +83,11 @@ void UvBootstrapper::installPython() {
 	emit stepStarted("install-python");
 
 	m_process = new QProcess(this);
-	m_process->setProgram(DaemonPaths::uvBinaryPath());
-	m_process->setArguments({"python", "install", "3.11"});
+	const QStringList arguments = QStringList() << "python" << "install" << "3.11";
 
-	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-	        this, &UvBootstrapper::onInstallPythonFinished);
-	m_process->start();
+	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
+	        this, SLOT(onInstallPythonFinished(int, QProcess::ExitStatus)));
+	m_process->start(DaemonPaths::uvBinaryPath(), arguments);
 }
 
 void UvBootstrapper::onInstallPythonFinished(int exitCode, QProcess::ExitStatus status) {
@@ -102,7 +102,7 @@ void UvBootstrapper::onInstallPythonFinished(int exitCode, QProcess::ExitStatus 
 // ─── Step 3: create run_venv, isolated from any plugin venv ─────────────────
 
 void UvBootstrapper::createVenv() {
-	if (QFileInfo::exists(venvPythonPath())) {
+	if (QFileInfo(venvPythonPath()).exists()) {
 		installDeps();
 		return;
 	}
@@ -110,12 +110,11 @@ void UvBootstrapper::createVenv() {
 	emit stepStarted("create-venv");
 
 	m_process = new QProcess(this);
-	m_process->setProgram(DaemonPaths::uvBinaryPath());
-	m_process->setArguments({"venv", DaemonPaths::runVenvDir(), "--python", "3.11"});
+	const QStringList arguments = QStringList() << "venv" << DaemonPaths::runVenvDir() << "--python" << "3.11";
 
-	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-	        this, &UvBootstrapper::onCreateVenvFinished);
-	m_process->start();
+	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
+	        this, SLOT(onCreateVenvFinished(int, QProcess::ExitStatus)));
+	m_process->start(DaemonPaths::uvBinaryPath(), arguments);
 }
 
 void UvBootstrapper::onCreateVenvFinished(int exitCode, QProcess::ExitStatus status) {
@@ -133,15 +132,13 @@ void UvBootstrapper::installDeps() {
 	emit stepStarted("install-deps");
 
 	m_process = new QProcess(this);
-	m_process->setProgram(DaemonPaths::uvBinaryPath());
-	m_process->setArguments({
-		"pip", "install", "--python", venvPythonPath(),
-		"fastapi", "uvicorn[standard]"
-	});
+	const QStringList arguments = QStringList()
+		<< "pip" << "install" << "--python" << venvPythonPath()
+		<< "fastapi" << "uvicorn[standard]";
 
-	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-	        this, &UvBootstrapper::onInstallDepsFinished);
-	m_process->start();
+	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
+	        this, SLOT(onInstallDepsFinished(int, QProcess::ExitStatus)));
+	m_process->start(DaemonPaths::uvBinaryPath(), arguments);
 }
 
 void UvBootstrapper::onInstallDepsFinished(int exitCode, QProcess::ExitStatus status) {
@@ -152,3 +149,7 @@ void UvBootstrapper::onInstallDepsFinished(int exitCode, QProcess::ExitStatus st
 	emit stepSucceeded("install-deps");
 	emit ready();
 }
+
+// Manually included -- see the comment in DaemonHealthMonitor.cpp
+// (daz-python-bridge-7wq).
+#include "moc_UvBootstrapper.cpp"

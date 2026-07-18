@@ -59,9 +59,15 @@ signals:
 	// dependency resolution is what ultimately failed.
 	void finished(const QString &pluginId, bool success, const QString &errorMessage);
 
+private slots:
+	// No QNetworkReply* param: connected via old-style SIGNAL()/SLOT() macros
+	// (this class is compiled against Qt 4.8 for the SDK4 DSS plugin,
+	// daz-python-bridge-7wq, which has no PMF-based connect()/lambda-slot
+	// support), so the reply that fired finished() is recovered via sender().
+	void onStopReplyFinished();
+
 private:
 	void commitAndResolveDeps();
-	void onStopReplyFinished(QNetworkReply *reply);
 	static QString readManifestVersion(const QString &manifestPath);
 
 	QString                     m_pluginsDir;

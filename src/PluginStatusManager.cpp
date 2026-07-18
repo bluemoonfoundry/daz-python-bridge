@@ -1,10 +1,8 @@
 #include "PluginStatusManager.h"
 
 #include "DaemonProcess.h"
+#include "JsonStd.h"
 
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -13,16 +11,19 @@
 namespace {
 
 QString baseUrl() {
-	return QStringLiteral("http://127.0.0.1:%1").arg(DaemonProcess::kPort);
+	return QString::fromLatin1("http://127.0.0.1:%1").arg(DaemonProcess::kPort);
 }
 
-PluginStatus parsePlugin(const QJsonObject &obj) {
+PluginStatus parsePlugin(const QVariantMap &obj) {
 	PluginStatus status;
 	status.pluginId = obj.value("plugin_id").toString();
 	status.state = obj.value("state").toString();
-	status.pid = obj.value("pid").isNull() ? -1 : (qint64)obj.value("pid").toDouble();
-	status.memoryBytes = obj.value("memory_bytes").isNull() ? -1 : (qint64)obj.value("memory_bytes").toDouble();
-	status.lastUsed = obj.value("last_used").isNull() ? 0.0 : obj.value("last_used").toDouble();
+	const QVariant pid = obj.value("pid");
+	status.pid = pid.isNull() ? -1 : pid.toLongLong();
+	const QVariant memoryBytes = obj.value("memory_bytes");
+	status.memoryBytes = memoryBytes.isNull() ? -1 : memoryBytes.toLongLong();
+	const QVariant lastUsed = obj.value("last_used");
+	status.lastUsed = lastUsed.isNull() ? 0.0 : lastUsed.toDouble();
 	return status;
 }
 
@@ -30,7 +31,9 @@ PluginStatus parsePlugin(const QJsonObject &obj) {
 
 PluginStatusManager::PluginStatusManager(QObject *parent) : QObject(parent) {
 	m_networkManager = new QNetworkAccessManager(this);
-	connect(&m_timer, &QTimer::timeout, this, &PluginStatusManager::refresh);
+	// Old-style SIGNAL()/SLOT() connect, not PMF-based -- see the header's
+	// comment on onListReplyFinished()/onActionReplyFinished().
+	connect(&m_timer, SIGNAL(timeout()), this, SLOT(refresh()));
 }
 
 void PluginStatusManager::start(int intervalMs) {
@@ -55,12 +58,15 @@ void PluginStatusManager::refresh() {
 		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
 	}
 	QNetworkReply *reply = m_networkManager->get(request);
-	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-		onListReplyFinished(reply);
-	});
+	connect(reply, SIGNAL(finished()), this, SLOT(onListReplyFinished()));
 }
 
-void PluginStatusManager::onListReplyFinished(QNetworkReply *reply) {
+void PluginStatusManager::onListReplyFinished() {
+	QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+	if (!reply) {
+		return;
+	}
+
 	m_requestInFlight = false;
 	reply->deleteLater();
 
@@ -68,16 +74,17 @@ void PluginStatusManager::onListReplyFinished(QNetworkReply *reply) {
 		return;
 	}
 
-	const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-	if (!doc.isObject()) {
+	QVariantMap body;
+	std::string parseError;
+	if (!JsonStd::parseObject(reply->readAll(), body, parseError)) {
 		return;
 	}
 
-	const QJsonArray plugins = doc.object().value("plugins").toArray();
+	const QVariantList plugins = body.value("plugins").toList();
 	QVector<PluginStatus> result;
 	result.reserve(plugins.size());
-	for (const QJsonValue &value : plugins) {
-		result.append(parsePlugin(value.toObject()));
+	for (const QVariant &value : plugins) {
+		result.append(parsePlugin(value.toMap()));
 	}
 	emit pluginsUpdated(result);
 }
@@ -99,19 +106,31 @@ void PluginStatusManager::performAction(const QString &pluginId, Action action) 
 		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
 	}
 	QNetworkReply *reply = m_networkManager->post(request, QByteArray());
-	connect(reply, &QNetworkReply::finished, this, [this, reply, pluginId, action]() {
-		onActionReplyFinished(reply, pluginId, action);
-	});
+	// Dynamic properties carry pluginId/action through to onActionReplyFinished()
+	// -- old-style SIGNAL()/SLOT() connect (needed for Qt4/SDK4, see the
+	// header comment) can't lambda-capture them the way this used to.
+	reply->setProperty("dpb_pluginId", pluginId);
+	reply->setProperty("dpb_action", static_cast<int>(action));
+	connect(reply, SIGNAL(finished()), this, SLOT(onActionReplyFinished()));
 }
 
-void PluginStatusManager::onActionReplyFinished(QNetworkReply *reply, const QString &pluginId, Action action) {
+void PluginStatusManager::onActionReplyFinished() {
+	QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+	if (!reply) {
+		return;
+	}
+	const QString pluginId = reply->property("dpb_pluginId").toString();
+	const Action action = static_cast<Action>(reply->property("dpb_action").toInt());
 	reply->deleteLater();
 
 	const bool success = reply->error() == QNetworkReply::NoError;
 	QString errorMessage;
 	if (!success) {
-		const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-		errorMessage = doc.isObject() ? doc.object().value("detail").toString() : reply->errorString();
+		QVariantMap body;
+		std::string parseError;
+		if (JsonStd::parseObject(reply->readAll(), body, parseError)) {
+			errorMessage = body.value("detail").toString();
+		}
 		if (errorMessage.isEmpty()) {
 			errorMessage = reply->errorString();
 		}
@@ -120,3 +139,7 @@ void PluginStatusManager::onActionReplyFinished(QNetworkReply *reply, const QStr
 	emit actionFinished(pluginId, action, success, errorMessage);
 	refresh();
 }
+
+// Manually included -- see the comment in DaemonHealthMonitor.cpp
+// (daz-python-bridge-7wq).
+#include "moc_PluginStatusManager.cpp"

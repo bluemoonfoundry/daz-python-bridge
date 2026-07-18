@@ -1,12 +1,12 @@
 #include "PluginInstaller.h"
 
 #include "DaemonProcess.h"
+#include "JsonStd.h"
+#include "PortableFs.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -25,11 +25,12 @@ QString PluginInstaller::readManifestVersion(const QString &manifestPath) {
 	if (!manifestFile.open(QIODevice::ReadOnly)) {
 		return QString();
 	}
-	const QJsonDocument doc = QJsonDocument::fromJson(manifestFile.readAll());
-	if (!doc.isObject()) {
+	QVariantMap manifest;
+	std::string parseError;
+	if (!JsonStd::parseObject(manifestFile.readAll(), manifest, parseError)) {
 		return QString();
 	}
-	return doc.object().value(QStringLiteral("version")).toString();
+	return manifest.value(QString::fromLatin1("version")).toString();
 }
 
 void PluginInstaller::install(const QString &zipPath) {
@@ -44,7 +45,7 @@ void PluginInstaller::install(const QString &zipPath) {
 	}
 
 	const QString finalDir = QDir(m_pluginsDir).filePath(m_staged.pluginId);
-	if (!QFileInfo::exists(finalDir)) {
+	if (!QFileInfo(finalDir).exists()) {
 		commitAndResolveDeps();
 		return;
 	}
@@ -57,21 +58,25 @@ void PluginInstaller::install(const QString &zipPath) {
 	// instead of silently corrupting the plugin directory.
 	m_oldVersion = readManifestVersion(QDir(finalDir).filePath("manifest.json"));
 	if (m_oldVersion.isNull()) {
-		m_oldVersion = QStringLiteral("");  // "" (not null) now means "reinstall, no prior version"
+		m_oldVersion = QString::fromLatin1("");  // "" (not null) now means "reinstall, no prior version"
 	}
 
-	QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/plugins/%2/stop")
+	QNetworkRequest request(QUrl(QString::fromLatin1("http://127.0.0.1:%1/plugins/%2/stop")
 		.arg(DaemonProcess::kPort).arg(m_staged.pluginId)));
 	if (!m_authToken.isEmpty()) {
 		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
 	}
 	QNetworkReply *reply = m_networkManager->post(request, QByteArray());
-	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-		onStopReplyFinished(reply);
-	});
+	// Old-style SIGNAL()/SLOT() connect -- see the header comment on
+	// onStopReplyFinished().
+	connect(reply, SIGNAL(finished()), this, SLOT(onStopReplyFinished()));
 }
 
-void PluginInstaller::onStopReplyFinished(QNetworkReply *reply) {
+void PluginInstaller::onStopReplyFinished() {
+	QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+	if (!reply) {
+		return;
+	}
 	reply->deleteLater();
 	// Errors (daemon not running, plugin never had a worker, auth mismatch,
 	// ...) are not fatal here -- see the comment in install() -- so this
@@ -83,7 +88,7 @@ void PluginInstaller::commitAndResolveDeps() {
 	ZipInstaller zipInstaller(m_pluginsDir, m_limits);
 	const ZipInstaller::CommitResult committed = zipInstaller.commit(m_staged.pluginId, m_staged.stagingDir);
 	if (!committed.success) {
-		QDir(m_staged.stagingDir).removeRecursively();
+		PortableFs::removeRecursively(m_staged.stagingDir);
 		emit finished(m_staged.pluginId, false, committed.errorMessage);
 		return;
 	}
@@ -93,6 +98,14 @@ void PluginInstaller::commitAndResolveDeps() {
 	}
 
 	m_depInstaller = new PluginDependencyInstaller(this);
-	connect(m_depInstaller, &PluginDependencyInstaller::finished, this, &PluginInstaller::finished);
+	// Signal-to-signal forwarding via old-style SIGNAL()/SIGNAL() connect --
+	// this class is compiled against Qt 4.8 for the SDK4 DSS plugin
+	// (daz-python-bridge-7wq), which has no PMF-based connect().
+	connect(m_depInstaller, SIGNAL(finished(QString, bool, QString)),
+	        this, SIGNAL(finished(QString, bool, QString)));
 	m_depInstaller->run(m_staged.pluginId, committed.finalPluginDir);
 }
+
+// Manually included -- see the comment in DaemonHealthMonitor.cpp
+// (daz-python-bridge-7wq).
+#include "moc_PluginInstaller.cpp"

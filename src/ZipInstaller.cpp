@@ -1,14 +1,21 @@
 #include "ZipInstaller.h"
 
+#include "JsonStd.h"
+#include "PortableFs.h"
 #include "miniz.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QRegularExpression>
 #include <QUuid>
+
+// QRegularExpression is Qt5+; Qt 4.8 (SDK4 DSS plugin, daz-python-bridge-7wq)
+// only has the older QRegExp.
+#if DAZ_SDK_MAJOR_VERSION >= 6
+#include <QRegularExpression>
+#else
+#include <QRegExp>
+#endif
 
 namespace {
 
@@ -26,9 +33,13 @@ bool isSafeRelativePath(const QString &entryName)
 	if (entryName.size() >= 2 && entryName.at(1) == ':')
 		return false;
 
+#if DAZ_SDK_MAJOR_VERSION >= 6
 	const QStringList segments = entryName.split(QRegularExpression("[/\\\\]"), Qt::SkipEmptyParts);
+#else
+	const QStringList segments = entryName.split(QRegExp("[/\\\\]"), QString::SkipEmptyParts);
+#endif
 	for (const QString &segment : segments) {
-		if (segment == QLatin1String(".."))
+		if (segment == QString::fromLatin1(".."))
 			return false;
 	}
 	return true;
@@ -87,6 +98,18 @@ private:
 	mz_zip_archive *m_zip;
 };
 
+// QUuid::WithoutBraces is Qt5.11+; Qt 4.8's QUuid::toString() always
+// includes the surrounding braces, so strip them manually
+// (daz-python-bridge-7wq).
+QString newUuidNoBraces() {
+#if DAZ_SDK_MAJOR_VERSION >= 6
+	return QUuid::createUuid().toString(QUuid::WithoutBraces);
+#else
+	const QString withBraces = QUuid::createUuid().toString();
+	return withBraces.mid(1, withBraces.length() - 2);
+#endif
+}
+
 }  // namespace
 
 ZipInstaller::ZipInstaller(QString pluginsDir, Limits limits)
@@ -106,9 +129,9 @@ ZipInstaller::Result ZipInstaller::install(const QString &zipPath) const
 	}
 
 	const QString finalDir = QDir(m_pluginsDir).filePath(staged.pluginId);
-	if (QFileInfo::exists(finalDir)) {
-		QDir(staged.stagingDir).removeRecursively();
-		result.errorMessage = QStringLiteral(
+	if (QFileInfo(finalDir).exists()) {
+		PortableFs::removeRecursively(staged.stagingDir);
+		result.errorMessage = QString::fromLatin1(
 			"Plugin '%1' is already installed; reinstall is not handled by this installer").arg(staged.pluginId);
 		return result;
 	}
@@ -129,26 +152,26 @@ ZipInstaller::StageResult ZipInstaller::extractToStaging(const QString &zipPath)
 {
 	StageResult result;
 
-	if (!QFileInfo::exists(zipPath)) {
-		result.errorMessage = QStringLiteral("Archive not found: %1").arg(zipPath);
+	if (!QFileInfo(zipPath).exists()) {
+		result.errorMessage = QString::fromLatin1("Archive not found: %1").arg(zipPath);
 		return result;
 	}
 
 	QDir pluginsDir(m_pluginsDir);
-	if (!pluginsDir.mkpath(QStringLiteral("."))) {
-		result.errorMessage = QStringLiteral("Could not create plugins directory: %1").arg(m_pluginsDir);
+	if (!pluginsDir.mkpath(QString::fromLatin1("."))) {
+		result.errorMessage = QString::fromLatin1("Could not create plugins directory: %1").arg(m_pluginsDir);
 		return result;
 	}
 
-	const QString stagingRoot = pluginsDir.filePath(QStringLiteral(".staging/") + QUuid::createUuid().toString(QUuid::WithoutBraces));
+	const QString stagingRoot = pluginsDir.filePath(QString::fromLatin1(".staging/") + newUuidNoBraces());
 	QDir stagingDir(stagingRoot);
-	if (!stagingDir.mkpath(QStringLiteral("."))) {
-		result.errorMessage = QStringLiteral("Could not create staging directory: %1").arg(stagingRoot);
+	if (!stagingDir.mkpath(QString::fromLatin1("."))) {
+		result.errorMessage = QString::fromLatin1("Could not create staging directory: %1").arg(stagingRoot);
 		return result;
 	}
 
 	auto failAndCleanStaging = [&](const QString &message) -> StageResult {
-		QDir(stagingRoot).removeRecursively();
+		PortableFs::removeRecursively(stagingRoot);
 		result.success = false;
 		result.errorMessage = message;
 		return result;
@@ -157,13 +180,13 @@ ZipInstaller::StageResult ZipInstaller::extractToStaging(const QString &zipPath)
 	mz_zip_archive zip;
 	memset(&zip, 0, sizeof(zip));
 	if (!mz_zip_reader_init_file(&zip, zipPath.toUtf8().constData(), 0)) {
-		return failAndCleanStaging(QStringLiteral("Not a valid zip archive: %1").arg(zipPath));
+		return failAndCleanStaging(QString::fromLatin1("Not a valid zip archive: %1").arg(zipPath));
 	}
 	ZipReaderGuard zipGuard(&zip);
 
 	const mz_uint numFiles = mz_zip_reader_get_num_files(&zip);
 	if (static_cast<int>(numFiles) > m_limits.maxEntryCount) {
-		return failAndCleanStaging(QStringLiteral("Archive has too many entries (%1 > %2)")
+		return failAndCleanStaging(QString::fromLatin1("Archive has too many entries (%1 > %2)")
 			.arg(numFiles).arg(m_limits.maxEntryCount));
 	}
 
@@ -172,44 +195,44 @@ ZipInstaller::StageResult ZipInstaller::extractToStaging(const QString &zipPath)
 	for (mz_uint i = 0; i < numFiles; ++i) {
 		mz_zip_archive_file_stat stat;
 		if (!mz_zip_reader_file_stat(&zip, i, &stat)) {
-			return failAndCleanStaging(QStringLiteral("Could not read archive entry %1").arg(i));
+			return failAndCleanStaging(QString::fromLatin1("Could not read archive entry %1").arg(i));
 		}
 
 		if (stat.m_is_encrypted) {
-			return failAndCleanStaging(QStringLiteral("Encrypted entries are not allowed: %1")
+			return failAndCleanStaging(QString::fromLatin1("Encrypted entries are not allowed: %1")
 				.arg(QString::fromUtf8(stat.m_filename)));
 		}
 		if (!stat.m_is_supported) {
-			return failAndCleanStaging(QStringLiteral("Unsupported compression method for entry: %1")
+			return failAndCleanStaging(QString::fromLatin1("Unsupported compression method for entry: %1")
 				.arg(QString::fromUtf8(stat.m_filename)));
 		}
 
 		const QString entryName = QString::fromUtf8(stat.m_filename);
 		if (!isSafeRelativePath(entryName)) {
-			return failAndCleanStaging(QStringLiteral("Archive entry has an unsafe path: %1").arg(entryName));
+			return failAndCleanStaging(QString::fromLatin1("Archive entry has an unsafe path: %1").arg(entryName));
 		}
 		if (isSymlinkEntry(stat)) {
-			return failAndCleanStaging(QStringLiteral("Symlink entries are not allowed: %1").arg(entryName));
+			return failAndCleanStaging(QString::fromLatin1("Symlink entries are not allowed: %1").arg(entryName));
 		}
 
 		// Header-based pre-check: cheap, but a crafted header can lie -- the
 		// real enforcement is the live recount in liveExtractWriteCallback below.
 		if (stat.m_uncomp_size > static_cast<mz_uint64>(m_limits.maxEntryUncompressedBytes)) {
-			return failAndCleanStaging(QStringLiteral("Archive entry exceeds the per-entry size limit: %1").arg(entryName));
+			return failAndCleanStaging(QString::fromLatin1("Archive entry exceeds the per-entry size limit: %1").arg(entryName));
 		}
 		if (stat.m_uncomp_size > 0 && stat.m_comp_size == 0) {
-			return failAndCleanStaging(QStringLiteral("Archive entry has an implausible size (possible zip bomb): %1").arg(entryName));
+			return failAndCleanStaging(QString::fromLatin1("Archive entry has an implausible size (possible zip bomb): %1").arg(entryName));
 		}
 		if (stat.m_comp_size > 0) {
 			const qint64 ratio = static_cast<qint64>(stat.m_uncomp_size / stat.m_comp_size);
 			if (ratio > m_limits.maxCompressionRatio) {
-				return failAndCleanStaging(QStringLiteral("Archive entry's compression ratio is implausible (possible zip bomb): %1").arg(entryName));
+				return failAndCleanStaging(QString::fromLatin1("Archive entry's compression ratio is implausible (possible zip bomb): %1").arg(entryName));
 			}
 		}
 
 		if (stat.m_is_directory) {
 			if (!stagingDir.mkpath(entryName)) {
-				return failAndCleanStaging(QStringLiteral("Could not create directory for entry: %1").arg(entryName));
+				return failAndCleanStaging(QString::fromLatin1("Could not create directory for entry: %1").arg(entryName));
 			}
 			continue;
 		}
@@ -217,12 +240,12 @@ ZipInstaller::StageResult ZipInstaller::extractToStaging(const QString &zipPath)
 		const QString destPath = stagingDir.filePath(entryName);
 		const QFileInfo destInfo(destPath);
 		if (!QDir().mkpath(destInfo.absolutePath())) {
-			return failAndCleanStaging(QStringLiteral("Could not create parent directory for entry: %1").arg(entryName));
+			return failAndCleanStaging(QString::fromLatin1("Could not create parent directory for entry: %1").arg(entryName));
 		}
 
 		QFile destFile(destPath);
 		if (!destFile.open(QIODevice::WriteOnly)) {
-			return failAndCleanStaging(QStringLiteral("Could not write extracted entry: %1").arg(entryName));
+			return failAndCleanStaging(QString::fromLatin1("Could not write extracted entry: %1").arg(entryName));
 		}
 
 		LiveExtractContext ctx;
@@ -236,37 +259,43 @@ ZipInstaller::StageResult ZipInstaller::extractToStaging(const QString &zipPath)
 
 		if (!extractOk) {
 			if (ctx.limitExceeded) {
-				return failAndCleanStaging(QStringLiteral("Archive exceeded size limits during extraction (zip bomb defense): %1").arg(entryName));
+				return failAndCleanStaging(QString::fromLatin1("Archive exceeded size limits during extraction (zip bomb defense): %1").arg(entryName));
 			}
-			return failAndCleanStaging(QStringLiteral("Failed to extract archive entry: %1").arg(entryName));
+			return failAndCleanStaging(QString::fromLatin1("Failed to extract archive entry: %1").arg(entryName));
 		}
 	}
 
 	// manifest.json is required at the extracted root and must name the
 	// plugin id this install will land under.
-	const QString manifestPath = stagingDir.filePath(QStringLiteral("manifest.json"));
+	const QString manifestPath = stagingDir.filePath(QString::fromLatin1("manifest.json"));
 	QFile manifestFile(manifestPath);
 	if (!manifestFile.open(QIODevice::ReadOnly)) {
-		return failAndCleanStaging(QStringLiteral("Archive is missing manifest.json at its root"));
+		return failAndCleanStaging(QString::fromLatin1("Archive is missing manifest.json at its root"));
 	}
 	const QByteArray manifestBytes = manifestFile.readAll();
 	manifestFile.close();
 
-	QJsonParseError parseError;
-	const QJsonDocument manifestDoc = QJsonDocument::fromJson(manifestBytes, &parseError);
-	if (parseError.error != QJsonParseError::NoError || !manifestDoc.isObject()) {
-		return failAndCleanStaging(QStringLiteral("manifest.json is not valid JSON: %1").arg(parseError.errorString()));
+	QVariantMap manifest;
+	std::string parseError;
+	if (!JsonStd::parseObject(manifestBytes, manifest, parseError)) {
+		return failAndCleanStaging(QString::fromLatin1("manifest.json is not valid JSON: %1").arg(QString::fromStdString(parseError)));
 	}
 
-	const QString pluginId = manifestDoc.object().value(QStringLiteral("id")).toString();
-	static const QRegularExpression idPattern(QStringLiteral("^[A-Za-z0-9_-]+$"));
-	if (pluginId.isEmpty() || !idPattern.match(pluginId).hasMatch()) {
-		return failAndCleanStaging(QStringLiteral("manifest.json 'id' field must be a non-empty string matching [A-Za-z0-9_-]+"));
+	const QString pluginId = manifest.value(QString::fromLatin1("id")).toString();
+#if DAZ_SDK_MAJOR_VERSION >= 6
+	static const QRegularExpression idPattern(QString::fromLatin1("^[A-Za-z0-9_-]+$"));
+	const bool idMatches = idPattern.match(pluginId).hasMatch();
+#else
+	static const QRegExp idPattern(QString::fromLatin1("^[A-Za-z0-9_-]+$"));
+	const bool idMatches = idPattern.exactMatch(pluginId);
+#endif
+	if (pluginId.isEmpty() || !idMatches) {
+		return failAndCleanStaging(QString::fromLatin1("manifest.json 'id' field must be a non-empty string matching [A-Za-z0-9_-]+"));
 	}
 
 	result.success = true;
 	result.pluginId = pluginId;
-	result.version = manifestDoc.object().value(QStringLiteral("version")).toString();
+	result.version = manifest.value(QString::fromLatin1("version")).toString();
 	result.stagingDir = stagingRoot;
 	return result;
 }
@@ -277,26 +306,26 @@ ZipInstaller::CommitResult ZipInstaller::commit(const QString &pluginId, const Q
 	QDir pluginsDir(m_pluginsDir);
 	const QString finalDir = pluginsDir.filePath(pluginId);
 
-	if (QFileInfo::exists(finalDir)) {
+	if (QFileInfo(finalDir).exists()) {
 		// Overwrite-by-id: move the existing install aside, swap the staged
 		// one into place, then discard the displaced one -- so a rename
 		// failure on either leg leaves a recognizable `.old-<uuid>` directory
 		// behind rather than a half-replaced or lost plugin.
 		const QString displacedDir = pluginsDir.filePath(
-			pluginId + QStringLiteral(".old-") + QUuid::createUuid().toString(QUuid::WithoutBraces));
+			pluginId + QString::fromLatin1(".old-") + newUuidNoBraces());
 		if (!QDir().rename(finalDir, displacedDir)) {
-			result.errorMessage = QStringLiteral(
+			result.errorMessage = QString::fromLatin1(
 				"Could not move aside the existing plugin to replace it (a running worker may still hold a file lock): %1").arg(finalDir);
 			return result;
 		}
 		if (!QDir().rename(stagingDir, finalDir)) {
 			QDir().rename(displacedDir, finalDir);  // best-effort restore of the previous install
-			result.errorMessage = QStringLiteral("Could not move staged plugin into place: %1").arg(finalDir);
+			result.errorMessage = QString::fromLatin1("Could not move staged plugin into place: %1").arg(finalDir);
 			return result;
 		}
-		QDir(displacedDir).removeRecursively();
+		PortableFs::removeRecursively(displacedDir);
 	} else if (!QDir().rename(stagingDir, finalDir)) {
-		result.errorMessage = QStringLiteral("Could not move staged plugin into place: %1").arg(finalDir);
+		result.errorMessage = QString::fromLatin1("Could not move staged plugin into place: %1").arg(finalDir);
 		return result;
 	}
 

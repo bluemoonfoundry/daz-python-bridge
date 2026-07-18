@@ -9,7 +9,9 @@
 
 DaemonHealthMonitor::DaemonHealthMonitor(QObject *parent) : QObject(parent) {
 	m_networkManager = new QNetworkAccessManager(this);
-	connect(&m_timer, &QTimer::timeout, this, &DaemonHealthMonitor::poll);
+	// Old-style SIGNAL()/SLOT() connect, not PMF-based -- see the class
+	// comment on onReplyFinished() below.
+	connect(&m_timer, SIGNAL(timeout()), this, SLOT(poll()));
 }
 
 void DaemonHealthMonitor::start(int intervalMs) {
@@ -29,17 +31,20 @@ void DaemonHealthMonitor::poll() {
 	}
 	m_requestInFlight = true;
 
-	QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/health").arg(DaemonProcess::kPort)));
+	QNetworkRequest request(QUrl(QString::fromLatin1("http://127.0.0.1:%1/health").arg(DaemonProcess::kPort)));
 	if (!m_authToken.isEmpty()) {
 		request.setRawHeader("X-DPB-Token", m_authToken.toUtf8());
 	}
 	QNetworkReply *reply = m_networkManager->get(request);
-	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-		onReplyFinished(reply);
-	});
+	connect(reply, SIGNAL(finished()), this, SLOT(onReplyFinished()));
 }
 
-void DaemonHealthMonitor::onReplyFinished(QNetworkReply *reply) {
+void DaemonHealthMonitor::onReplyFinished() {
+	QNetworkReply *reply = qobject_cast<QNetworkReply *>(sender());
+	if (!reply) {
+		return;
+	}
+
 	m_requestInFlight = false;
 	const bool ok = reply->error() == QNetworkReply::NoError;
 	reply->deleteLater();
@@ -52,3 +57,11 @@ void DaemonHealthMonitor::onReplyFinished(QNetworkReply *reply) {
 		emit healthDown();
 	}
 }
+
+// Manually included (not left to AUTOMOC's aggregated mocs_compilation.cpp)
+// because this file is compiled twice with different AUTOMOC_MOC_OPTIONS:
+// once into DazPythonBridgeCore (Qt6, default self-including moc output) and
+// once directly into DzPythonBridge for SDK4 (Qt 4.8), whose target sets
+// "-i" globally for pluginmain.cpp's header-less inline class -- which would
+// otherwise also suppress this header's self-include (daz-python-bridge-7wq).
+#include "moc_DaemonHealthMonitor.cpp"

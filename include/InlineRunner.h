@@ -32,9 +32,14 @@ signals:
 	// left to the caller to display since it may be any JSON type.
 	void runFinished(bool success, const QString &resultJson, const QStringList &output, const QString &error);
 
-private:
-	void onReplyFinished(QNetworkReply *reply);
+private slots:
+	// No QNetworkReply* param: connected via old-style SIGNAL()/SLOT() macros
+	// (this class is compiled against Qt 4.8 for the SDK4 DSS plugin,
+	// daz-python-bridge-7wq, which has no PMF-based connect()/lambda-slot
+	// support), so the reply that fired finished() is recovered via sender().
+	void onReplyFinished();
 
+private:
 	QNetworkAccessManager *m_networkManager = nullptr;
 	QString m_authToken;
 	bool m_requestInFlight = false;

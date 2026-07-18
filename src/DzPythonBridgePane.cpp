@@ -26,17 +26,17 @@ const int kColLastUsed = 4;
 
 QString formatMemory(qint64 bytes) {
 	if (bytes < 0) {
-		return QStringLiteral("—");
+		return QString::fromLatin1("—");
 	}
 	return QString("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 1);
 }
 
 QString formatPid(qint64 pid) {
-	return pid < 0 ? QStringLiteral("—") : QString::number(pid);
+	return pid < 0 ? QString::fromLatin1("—") : QString::number(pid);
 }
 
 QString formatLastUsed(double lastUsed) {
-	return lastUsed <= 0 ? QStringLiteral("never") : QStringLiteral("%1s ago").arg((int)lastUsed);
+	return lastUsed <= 0 ? QString::fromLatin1("never") : QString::fromLatin1("%1s ago").arg((int)lastUsed);
 }
 
 } // namespace
@@ -80,11 +80,15 @@ DzPythonBridgePane::DzPythonBridgePane()
 	buttonLayout->addWidget(m_pDisableButton);
 	contentLayout->addLayout(buttonLayout);
 
-	connect(m_pStartButton, &QPushButton::clicked, this, &DzPythonBridgePane::onStartClicked);
-	connect(m_pStopButton, &QPushButton::clicked, this, &DzPythonBridgePane::onStopClicked);
-	connect(m_pRestartButton, &QPushButton::clicked, this, &DzPythonBridgePane::onRestartClicked);
-	connect(m_pEnableButton, &QPushButton::clicked, this, &DzPythonBridgePane::onEnableClicked);
-	connect(m_pDisableButton, &QPushButton::clicked, this, &DzPythonBridgePane::onDisableClicked);
+	// Old-style SIGNAL()/SLOT() connect throughout this constructor, not the
+	// PMF-based connect() syntax: this pane is compiled against Qt 4.8 for
+	// the SDK4 build (daz-python-bridge-7wq), which predates Qt5's
+	// function-pointer connect() entirely.
+	connect(m_pStartButton, SIGNAL(clicked()), this, SLOT(onStartClicked()));
+	connect(m_pStopButton, SIGNAL(clicked()), this, SLOT(onStopClicked()));
+	connect(m_pRestartButton, SIGNAL(clicked()), this, SLOT(onRestartClicked()));
+	connect(m_pEnableButton, SIGNAL(clicked()), this, SLOT(onEnableClicked()));
+	connect(m_pDisableButton, SIGNAL(clicked()), this, SLOT(onDisableClicked()));
 
 	// ─── Script-IDE-style inline execution section (daz-python-bridge-sop.2) ───
 	QFrame* runSep = new QFrame(this);
@@ -94,14 +98,24 @@ DzPythonBridgePane::DzPythonBridgePane()
 	QLabel* runLabel = new QLabel("Run Python (isolated run_venv)", m_pContentContainer);
 
 	m_pScriptEditor = new QPlainTextEdit(m_pContentContainer);
+#if DAZ_SDK_MAJOR_VERSION >= 6
+	// setPlaceholderText (Qt5.3+), setTabStopDistance/horizontalAdvance
+	// (Qt5.10+/5.11+) have no Qt4 equivalents that matter here -- SDK4
+	// (daz-python-bridge-7wq) just gets the older setTabStopWidth() and no
+	// placeholder text, a purely cosmetic difference.
 	m_pScriptEditor->setPlaceholderText("print('hello')\nresult = 1 + 1\nresult");
 	m_pScriptEditor->setTabStopDistance(4 * m_pScriptEditor->fontMetrics().horizontalAdvance(' '));
+#else
+	m_pScriptEditor->setTabStopWidth(4 * m_pScriptEditor->fontMetrics().width(' '));
+#endif
 
 	m_pExecuteButton = new QPushButton("Execute", m_pContentContainer);
 
 	m_pRunOutput = new QPlainTextEdit(m_pContentContainer);
 	m_pRunOutput->setReadOnly(true);
+#if DAZ_SDK_MAJOR_VERSION >= 6
 	m_pRunOutput->setPlaceholderText("Output and result appear here.");
+#endif
 
 	contentLayout->addWidget(runSep);
 	contentLayout->addWidget(runLabel);
@@ -109,7 +123,7 @@ DzPythonBridgePane::DzPythonBridgePane()
 	contentLayout->addWidget(m_pExecuteButton);
 	contentLayout->addWidget(m_pRunOutput);
 
-	connect(m_pExecuteButton, &QPushButton::clicked, this, &DzPythonBridgePane::onExecuteClicked);
+	connect(m_pExecuteButton, SIGNAL(clicked()), this, SLOT(onExecuteClicked()));
 
 	// DSS is the sole generator for the daemon's token (daz-python-bridge-sop.7);
 	// the daemon only ever reads dazpythonbridge_token.txt at its own startup.
@@ -118,15 +132,21 @@ DzPythonBridgePane::DzPythonBridgePane()
 
 	m_pStatusManager = new PluginStatusManager(this);
 	m_pStatusManager->setAuthToken(m_authService.getToken());
-	connect(m_pStatusManager, &PluginStatusManager::pluginsUpdated,
-	        this, &DzPythonBridgePane::onPluginsUpdated);
-	connect(m_pStatusManager, &PluginStatusManager::actionFinished,
-	        this, &DzPythonBridgePane::onActionFinished);
+	connect(m_pStatusManager, SIGNAL(pluginsUpdated(QVector<PluginStatus>)),
+	        this, SLOT(onPluginsUpdated(QVector<PluginStatus>)));
+	// Unqualified "Action" (not "PluginStatusManager::Action") to match moc's
+	// registered signature: it normalizes each signal's parameter types as
+	// literally spelled at the signal's own declaration site (inside the
+	// class body, where "Action" needs no qualification) -- writing the
+	// qualified name here would silently fail to match at connect() time.
+	connect(m_pStatusManager, SIGNAL(actionFinished(QString, Action, bool, QString)),
+	        this, SLOT(onActionFinished(QString, PluginStatusManager::Action, bool, QString)));
 	m_pStatusManager->start(kPollIntervalMs);
 
 	m_pInlineRunner = new InlineRunner(this);
 	m_pInlineRunner->setAuthToken(m_authService.getToken());
-	connect(m_pInlineRunner, &InlineRunner::runFinished, this, &DzPythonBridgePane::onRunFinished);
+	connect(m_pInlineRunner, SIGNAL(runFinished(bool, QString, QStringList, QString)),
+	        this, SLOT(onRunFinished(bool, QString, QStringList, QString)));
 
 	QVBoxLayout* mainLayout = new QVBoxLayout(this);
 	mainLayout->setContentsMargins(4, 4, 4, 4);

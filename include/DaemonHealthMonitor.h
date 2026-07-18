@@ -37,7 +37,12 @@ signals:
 
 private slots:
 	void poll();
-	void onReplyFinished(QNetworkReply *reply);
+	// No QNetworkReply* param: connected via old-style SIGNAL()/SLOT() macros
+	// (this class is compiled against Qt 4.8 for the SDK4 DSS plugin,
+	// daz-python-bridge-7wq, which has no PMF-based connect()/lambda-slot
+	// support), so the reply that fired finished() is recovered via sender()
+	// instead of being lambda-captured.
+	void onReplyFinished();
 
 private:
 	QNetworkAccessManager *m_networkManager = nullptr;

@@ -39,16 +39,19 @@ public:
 	void setAuthToken(const QString &token) { m_authToken = token; }
 
 	enum class Action { Start, Stop, Restart, Enable, Disable };
-	Q_ENUM(Action)
+	// Q_ENUMS (not Q_ENUM): Q_ENUM is Qt 5.5+ only, and this header is
+	// compiled against Qt 4.8 for the SDK4 DSS plugin (daz-python-bridge-7wq).
+	// Verified against the real SDK4 moc.exe (Qt 4.8.1): it parses
+	// "enum class" fine and registers signals using the enum's unqualified
+	// name (e.g. actionFinished(QString,Action,bool)), which is why the
+	// connect() calls in DzPythonBridgePane.cpp use unqualified "Action".
+	Q_ENUMS(Action)
 
 	// Fires the corresponding POST /plugins/{pluginId}/{action} call. Result
 	// arrives via actionFinished(); does not block. A refresh() is triggered
 	// automatically once the action completes so the pane's list reflects it
 	// promptly rather than waiting for the next poll tick.
 	void performAction(const QString &pluginId, Action action);
-
-	// Polls once immediately, independent of the timer interval.
-	void refresh();
 
 signals:
 	// Emitted after every successful poll with the full current plugin list.
@@ -57,9 +60,25 @@ signals:
 	// Emitted once per performAction() call.
 	void actionFinished(const QString &pluginId, Action action, bool success, const QString &errorMessage);
 
+public slots:
+	// Polls once immediately, independent of the timer interval. A slot (not
+	// just a plain method) so m_timer's timeout() can target it via
+	// old-style SIGNAL()/SLOT() connect -- this class is compiled against
+	// Qt 4.8 for the SDK4 DSS plugin (daz-python-bridge-7wq), which has no
+	// PMF-based connect().
+	void refresh();
+
+private slots:
+	// No QNetworkReply*/pluginId/Action params: connected via old-style
+	// SIGNAL()/SLOT() macros, which can't lambda-capture extra context the
+	// way the PMF-based connect() this used to use could. The reply itself
+	// comes back via sender(); onActionReplyFinished's extra pluginId/action
+	// context travels as dynamic properties stashed on the reply in
+	// performAction() below (see the "dpb_" properties there).
+	void onListReplyFinished();
+	void onActionReplyFinished();
+
 private:
-	void onListReplyFinished(QNetworkReply *reply);
-	void onActionReplyFinished(QNetworkReply *reply, const QString &pluginId, Action action);
 	static QString actionPath(Action action);
 
 	QNetworkAccessManager *m_networkManager = nullptr;

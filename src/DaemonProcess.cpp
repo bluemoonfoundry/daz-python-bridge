@@ -4,6 +4,13 @@
 
 #include <QDir>
 
+// Q_PID on Windows is PROCESS_INFORMATION*, only forward-declared by Qt4's
+// own headers -- windows.h is needed for processId() below to dereference it
+// (Qt5+'s QProcess::processId() needs none of this) (daz-python-bridge-7wq).
+#if DAZ_SDK_MAJOR_VERSION < 6 && defined(Q_OS_WIN)
+#include <windows.h>
+#endif
+
 DaemonProcess::DaemonProcess(QObject *parent) : QObject(parent) {}
 
 DaemonProcess::~DaemonProcess() {
@@ -24,20 +31,26 @@ void DaemonProcess::start() {
 	const QString python = QDir(DaemonPaths::runVenvDir()).filePath("bin/python");
 #endif
 
-	m_process->setProgram(python);
-	m_process->setArguments({
-		"-m", "uvicorn",
-		"daemon.app:app",
-		"--host", "127.0.0.1",
-		"--port", QString::number(kPort)
-	});
+	// QStringList() << ... , not a brace-init list: QStringList's
+	// initializer-list constructor is Qt5+ only (daz-python-bridge-7wq).
+	const QStringList arguments = QStringList()
+		<< "-m" << "uvicorn"
+		<< "daemon.app:app"
+		<< "--host" << "127.0.0.1"
+		<< "--port" << QString::number(kPort);
 	m_process->setWorkingDirectory(DaemonPaths::baseDir());
 
-	connect(m_process, &QProcess::started, this, &DaemonProcess::onStarted);
-	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-	        this, &DaemonProcess::onFinished);
+	// Old-style SIGNAL()/SLOT() connect (not PMF-based): this class is
+	// compiled against Qt 4.8 for the SDK4 DSS plugin (daz-python-bridge-7wq),
+	// which has no function-pointer connect() overload.
+	connect(m_process, SIGNAL(started()), this, SLOT(onStarted()));
+	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
+	        this, SLOT(onFinished(int, QProcess::ExitStatus)));
 
-	m_process->start();
+	// start(program, arguments) in one call, not setProgram()+setArguments()+
+	// start() -- the latter is Qt5.6+ only; the combined-args overload is the
+	// one form that's always existed, from Qt4 through Qt6.
+	m_process->start(python, arguments);
 }
 
 void DaemonProcess::stop() {
@@ -59,7 +72,21 @@ bool DaemonProcess::isRunning() const {
 }
 
 qint64 DaemonProcess::processId() const {
-	return m_process ? m_process->processId() : 0;
+	if (!m_process) {
+		return 0;
+	}
+#if DAZ_SDK_MAJOR_VERSION >= 6
+	return m_process->processId();
+#elif defined(Q_OS_WIN)
+	// Qt4's QProcess::pid() returns Q_PID, which on Windows is a
+	// PROCESS_INFORMATION* rather than a plain integer -- unlike
+	// QProcess::processId() (Qt5+), which this replaces here for the SDK4
+	// DSS plugin (daz-python-bridge-7wq).
+	Q_PID pid = m_process->pid();
+	return pid ? static_cast<qint64>(pid->dwProcessId) : 0;
+#else
+	return static_cast<qint64>(m_process->pid());
+#endif
 }
 
 void DaemonProcess::onStarted() {
@@ -76,3 +103,7 @@ void DaemonProcess::onFinished(int exitCode, QProcess::ExitStatus status) {
 		emit crashed(exitCode, status);
 	}
 }
+
+// Manually included -- see the comment in DaemonHealthMonitor.cpp
+// (daz-python-bridge-7wq).
+#include "moc_DaemonProcess.cpp"

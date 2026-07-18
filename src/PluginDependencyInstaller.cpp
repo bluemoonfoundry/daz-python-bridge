@@ -1,12 +1,11 @@
 #include "PluginDependencyInstaller.h"
 
 #include "DaemonPaths.h"
+#include "JsonStd.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
 
 PluginDependencyInstaller::PluginDependencyInstaller(QObject *parent) : QObject(parent) {}
 
@@ -46,8 +45,8 @@ QString PluginDependencyInstaller::requirementsPath() const {
 }
 
 void PluginDependencyInstaller::writeStatusFile(bool success, const QString &step, const QString &errorMessage) const {
-	QJsonObject status;
-	status["state"] = success ? QStringLiteral("ok") : QStringLiteral("failed");
+	QVariantMap status;
+	status["state"] = success ? QString::fromLatin1("ok") : QString::fromLatin1("failed");
 	if (!success) {
 		status["step"] = step;
 		status["error"] = errorMessage;
@@ -55,7 +54,7 @@ void PluginDependencyInstaller::writeStatusFile(bool success, const QString &ste
 
 	QFile statusFile(QDir(m_pluginDir).filePath("install_status.json"));
 	if (statusFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-		statusFile.write(QJsonDocument(status).toJson());
+		statusFile.write(JsonStd::variantToJsonBytes(status));
 	}
 }
 
@@ -65,18 +64,26 @@ void PluginDependencyInstaller::createVenv() {
 	emit stepStarted("create-venv");
 
 	m_process = new QProcess(this);
-	m_process->setProgram(DaemonPaths::uvBinaryPath());
 	// --clear: a reinstall over an existing plugin id (daz-python-bridge-sop.8)
 	// re-runs dependency resolution against the *new* requirements.txt, but
 	// the venv directory itself lives outside the plugin's zip-extracted
 	// tree (under DaemonPaths::pluginVenvDir), so ZipInstaller's file swap
 	// never touches it -- without --clear, `uv venv` refuses to recreate an
 	// already-existing venv. Harmless no-op for a first install.
-	m_process->setArguments({"venv", DaemonPaths::pluginVenvDir(m_pluginId), "--python", "3.11", "--clear"});
+	// QStringList() << ... , not a brace-init list: QStringList's
+	// initializer-list constructor is Qt5+ only (daz-python-bridge-7wq).
+	const QStringList arguments = QStringList()
+		<< "venv" << DaemonPaths::pluginVenvDir(m_pluginId) << "--python" << "3.11" << "--clear";
 
-	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-	        this, &PluginDependencyInstaller::onCreateVenvFinished);
-	m_process->start();
+	// Old-style SIGNAL()/SLOT() macro connect, not the PMF-based connect()
+	// syntax: this class is compiled against Qt 4.8 for the SDK4 DSS plugin
+	// (daz-python-bridge-7wq), which predates Qt5's function-pointer connect
+	// entirely. Works identically under Qt6.
+	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
+	        this, SLOT(onCreateVenvFinished(int, QProcess::ExitStatus)));
+	// start(program, arguments) in one call -- see DaemonProcess.cpp's
+	// comment on why, not setProgram()+setArguments()+start().
+	m_process->start(DaemonPaths::uvBinaryPath(), arguments);
 }
 
 void PluginDependencyInstaller::onCreateVenvFinished(int exitCode, QProcess::ExitStatus status) {
@@ -91,7 +98,7 @@ void PluginDependencyInstaller::onCreateVenvFinished(int exitCode, QProcess::Exi
 // ─── Step 2: resolve requirements.txt into that venv, if the plugin has one ─
 
 void PluginDependencyInstaller::installDeps() {
-	if (!QFileInfo::exists(requirementsPath())) {
+	if (!QFileInfo(requirementsPath()).exists()) {
 		succeed();
 		return;
 	}
@@ -99,15 +106,13 @@ void PluginDependencyInstaller::installDeps() {
 	emit stepStarted("install-deps");
 
 	m_process = new QProcess(this);
-	m_process->setProgram(DaemonPaths::uvBinaryPath());
-	m_process->setArguments({
-		"pip", "install", "--python", venvPythonPath(),
-		"-r", requirementsPath()
-	});
+	const QStringList arguments = QStringList()
+		<< "pip" << "install" << "--python" << venvPythonPath()
+		<< "-r" << requirementsPath();
 
-	connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-	        this, &PluginDependencyInstaller::onInstallDepsFinished);
-	m_process->start();
+	connect(m_process, SIGNAL(finished(int, QProcess::ExitStatus)),
+	        this, SLOT(onInstallDepsFinished(int, QProcess::ExitStatus)));
+	m_process->start(DaemonPaths::uvBinaryPath(), arguments);
 }
 
 void PluginDependencyInstaller::onInstallDepsFinished(int exitCode, QProcess::ExitStatus status) {
@@ -118,3 +123,7 @@ void PluginDependencyInstaller::onInstallDepsFinished(int exitCode, QProcess::Ex
 	emit stepSucceeded("install-deps");
 	succeed();
 }
+
+// Manually included -- see the comment in DaemonHealthMonitor.cpp
+// (daz-python-bridge-7wq).
+#include "moc_PluginDependencyInstaller.cpp"
