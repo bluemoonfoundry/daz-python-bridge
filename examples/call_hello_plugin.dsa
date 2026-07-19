@@ -13,7 +13,7 @@
 //     use, same as the pane's own Start button does.
 
 function readToken() {
-	var tokenPath = dzApp.getHomePath() + "/.daz3d/dazpythonbridge_token.txt";
+	var tokenPath = App.getHomePath() + "/.daz3d/dazpythonbridge_token.txt";
 	var oFile = new DzFile(tokenPath);
 	if (!oFile.open(DzFile.ReadOnly)) {
 		print("ERROR: could not open token file: " + tokenPath);
